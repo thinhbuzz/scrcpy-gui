@@ -1,0 +1,73 @@
+{
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build",
+    "devPath": "http://localhost:1420",
+    "distDir": "../dist"
+  },
+  "package": {
+    "productName": "scrcpy-gui-tauri",
+    "version": "0.0.1"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": true,
+      "shell": {
+        "all": true,
+        "execute": true,
+        "sidecar": true,
+        "open": true,
+        "scope": [
+          {
+            "name": "adb.exe",
+            "cmd": "adb.exe",
+            "args": true,
+            "sidecar": false
+          },
+          {
+            "name": "scrcpy.exe",
+            "cmd": "scrcpy.exe",
+            "args": true,
+            "sidecar": false
+          },
+          {
+            "name": "adb",
+            "cmd": "adb",
+            "args": true,
+            "sidecar": false
+          },
+          {
+            "name": "scrcpy",
+            "cmd": "scrcpy",
+            "args": true,
+            "sidecar": false
+          }
+        ]
+      }
+    },
+    "bundle": {
+      "active": true,
+      "targets": "all",
+      "identifier": "me.thinhbuzz",
+      "icon": [
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/128x128@2x.png",
+        "icons/icon.icns",
+        "icons/icon.ico"
+      ]
+    },
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "fullscreen": false,
+        "resizable": true,
+        "title": "scrcpy-gui-tauri",
+        "width": 800,
+        "height": 600
+      }
+    ]
+  }
+}
