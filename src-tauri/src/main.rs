@@ -272,7 +272,7 @@ async fn get_adb_devices() -> Result<Vec<String>, String> {
 }
 
 fn main() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_os::init())
         .manage(AppState::default())
@@ -291,6 +291,25 @@ fn main() {
             spawn_monitor_loop(app.handle().clone(), state.inner().clone());
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { .. } = event {
+            let state = app_handle.state::<AppState>();
+            if let Ok(mut processes) = state.inner().scrcpy_processes.lock() {
+                for (device_id, child_arc) in processes.drain() {
+                    if let Ok(mut child_lock) = child_arc.lock() {
+                        if let Some(mut child) = child_lock.take() {
+                            println!(
+                                "Killing scrcpy process for device: {} due to app exit",
+                                device_id
+                            );
+                            let _ = tauri::async_runtime::block_on(child.kill());
+                        }
+                    }
+                }
+            }
+        }
+    });
 }
