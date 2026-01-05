@@ -20,16 +20,6 @@
           "name": "scrcpy.exe",
           "cmd": "scrcpy.exe",
           "args": true
-        },
-        {
-          "name": "adb",
-          "cmd": "adb",
-          "args": true
-        },
-        {
-          "name": "adb.exe",
-          "cmd": "adb.exe",
-          "args": true
         }
       ]
     },
@@ -44,16 +34,6 @@
         {
           "name": "scrcpy.exe",
           "cmd": "scrcpy.exe",
-          "args": true
-        },
-        {
-          "name": "adb",
-          "cmd": "adb",
-          "args": true
-        },
-        {
-          "name": "adb.exe",
-          "cmd": "adb.exe",
           "args": true
         }
       ]

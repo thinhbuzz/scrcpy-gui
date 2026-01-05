@@ -1,9 +1,8 @@
 <script lang="ts" setup>
-import { VNodeRef, onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import {
   CheckboxGroup,
   Button,
-  Textarea,
   CheckboxOptionType,
   InputNumber,
 } from "ant-design-vue";
@@ -12,6 +11,9 @@ import { type Child } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
 
 import { initializePlatform, getDevices, startScrcpy } from "../commands";
+import LogViewer from "./LogViewer.vue";
+import DeviceList from "./DeviceList.vue";
+
 const selectedDevices = useStorage<string[]>("selectedDevices", [], undefined, {
   mergeDefaults: true,
 });
@@ -29,25 +31,18 @@ const selectedOptions = useStorage<string[]>(
 const availableDevices = ref<string[]>([]);
 const startedDevices = ref<{ deviceId: string; process: Child }[]>([]);
 
-const logRef = ref<VNodeRef | undefined>(undefined);
+// Log management
+const logLines = ref<string[]>([]);
 const writeLog = (line: string): void => {
-  if (logRef.value) {
-    const textArea = (logRef.value as unknown as typeof Textarea)
-      .resizableTextArea.textArea;
-    textArea.value += line;
-    textArea.scrollTop = textArea.scrollHeight;
-  }
+  logLines.value.push(line);
 };
+
 const refreshDevices = async (): Promise<void> => {
   const devices = await getDevices();
-  // Merge or replace? Replacing is cleaner for a refresh.
-  // But we want to preserve selection if possible (handled separately by keys, but here we just update available devices)
   availableDevices.value = devices;
   writeLog(`Refreshed device list. Found ${devices.length} device(s).\n`);
 };
-const selectAllDevices = (isSelect: boolean): void => {
-  selectedDevices.value = isSelect ? [...availableDevices.value] : [];
-};
+
 let deviceConnectedUnlisten: (() => void) | null = null;
 let deviceDisconnectedUnlisten: (() => void) | null = null;
 
@@ -174,17 +169,7 @@ const stopProcesses = async (): Promise<void> => {
 
 <template>
   <div class="config-pannel">
-    <div class="log-container common-box flex-item">
-      <h3>Logs</h3>
-      <div class="log-scroller">
-        <Textarea
-          :rows="20"
-          ref="logRef"
-          :readonly="true"
-          :autoSize="false"
-        ></Textarea>
-      </div>
-    </div>
+    <LogViewer :log-lines="logLines" />
     <div class="config-column">
       <div class="config-container common-box flex-item">
         <h3>Configurations</h3>
@@ -216,36 +201,11 @@ const stopProcesses = async (): Promise<void> => {
           >
         </div>
       </div>
-      <div class="device-container common-box">
-        <div class="device-header">
-          <h3>Devices</h3>
-          <Button
-            danger
-            size="small"
-            v-on:click="selectAllDevices(true)"
-            :disabled="!availableDevices.length"
-          >
-            Select All
-          </Button>
-          <Button
-            danger
-            size="small"
-            v-on:click="selectAllDevices(false)"
-            :disabled="!availableDevices.length"
-          >
-            UnSelect All
-          </Button>
-          <Button type="primary" size="small" v-on:click="refreshDevices">
-            Refresh
-          </Button>
-        </div>
-        <CheckboxGroup
-          v-model:value="selectedDevices"
-          name="selectedDevices"
-          :options="availableDevices"
-          class="device-list vertical-checkbox-group"
-        />
-      </div>
+      <DeviceList
+        :availableDevices="availableDevices"
+        v-model:selectedDevices="selectedDevices"
+        @refresh="refreshDevices"
+      />
     </div>
   </div>
 </template>
@@ -271,16 +231,8 @@ const stopProcesses = async (): Promise<void> => {
 .config-column {
   max-width: 600px;
 }
-.log-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  .log-scroller {
-    flex-grow: 1;
-    overflow-x: hidden;
-    overflow-y: auto;
-  }
-}
+
+
 .config-container {
   width: 100%;
   display: flex;
@@ -298,22 +250,7 @@ const stopProcesses = async (): Promise<void> => {
     margin-bottom: 0;
   }
 }
-.device-container {
-  width: 100%;
-  .device-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-}
-.vertical-checkbox-group {
-  display: flex;
-  flex-direction: row;
-}
-.vertical-checkbox-group {
-  overflow-x: hidden;
-  overflow-y: auto;
-}
+
 h3 {
   margin-bottom: 10px;
 }
