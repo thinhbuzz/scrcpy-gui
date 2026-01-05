@@ -48,16 +48,11 @@ async fn start_device_monitoring(
             };
 
             // Find new devices
-            let new_devices: Vec<String> = devices_set
-                .difference(&previous_set)
-                .cloned()
-                .collect();
+            let new_devices: Vec<String> = devices_set.difference(&previous_set).cloned().collect();
 
             // Find removed devices
-            let removed_devices: Vec<String> = previous_set
-                .difference(&devices_set)
-                .cloned()
-                .collect();
+            let removed_devices: Vec<String> =
+                previous_set.difference(&devices_set).cloned().collect();
 
             // Update current devices
             {
@@ -101,7 +96,10 @@ fn get_adb_devices() -> Result<Vec<String>, String> {
         ""
     };
 
+    use std::os::windows::process::CommandExt;
+
     let output = Command::new(format!("adb{}", binary_ext))
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .arg("devices")
         .output()
         .map_err(|e| format!("Failed to execute adb: {}", e))?;
@@ -144,7 +142,7 @@ fn main() {
             let monitor_state = app.state::<DeviceMonitor>();
             let running_clone = monitor_state.running.clone();
             let current_devices_clone = monitor_state.current_devices.clone();
-            
+
             tauri::async_runtime::spawn(async move {
                 {
                     let mut running = running_clone.lock().unwrap();
@@ -171,16 +169,12 @@ fn main() {
                     };
 
                     // Find new devices
-                    let new_devices: Vec<String> = devices_set
-                        .difference(&previous_set)
-                        .cloned()
-                        .collect();
+                    let new_devices: Vec<String> =
+                        devices_set.difference(&previous_set).cloned().collect();
 
                     // Find removed devices
-                    let removed_devices: Vec<String> = previous_set
-                        .difference(&devices_set)
-                        .cloned()
-                        .collect();
+                    let removed_devices: Vec<String> =
+                        previous_set.difference(&devices_set).cloned().collect();
 
                     // Update current devices
                     {

@@ -34,16 +34,7 @@
     ],
     "security": {
       "capabilities": [
-        {
-          "identifier": "shell-access",
-          "description": "Allows executing adb and scrcpy commands",
-          "windows": ["main"],
-          "permissions": [
-            "shell:allow-execute",
-            "shell:allow-open"
-          ],
-          "platforms": ["windows", "linux", "macOS"]
-        }
+        "shell-access"
       ],
       "csp": null
     }
