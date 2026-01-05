@@ -1,19 +1,36 @@
 {
+  "productName": "scrcpy-gui-tauri",
+  "version": "0.0.1",
+  "identifier": "me.thinhbuzz",
   "build": {
-    "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build",
-    "devPath": "http://localhost:1420",
-    "distDir": "../dist"
+    "beforeDevCommand": "bun run dev",
+    "beforeBuildCommand": "bun run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
   },
-  "package": {
-    "productName": "scrcpy-gui-tauri",
-    "version": "0.0.1"
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
   },
-  "tauri": {
-    "permissions": [
-      "shell:allow-execute",
-      "shell:allow-open",
-      "shell:allow-sidecar"
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "fullscreen": false,
+        "resizable": true,
+        "title": "scrcpy-gui-tauri",
+        "width": 800,
+        "height": 600,
+        "minWidth": 600,
+        "minHeight": 400
+      }
     ],
     "security": {
       "capabilities": [
@@ -25,33 +42,10 @@
             "shell:allow-execute",
             "shell:allow-open"
           ],
-          "platforms": ["windows", "linux", "macos"]
+          "platforms": ["windows", "linux", "macOS"]
         }
       ],
       "csp": null
-    },
-    "bundle": {
-      "active": true,
-      "targets": "all",
-      "identifier": "me.thinhbuzz",
-      "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/128x128@2x.png",
-        "icons/icon.icns",
-        "icons/icon.ico"
-      ]
-    },
-    "windows": [
-      {
-        "fullscreen": false,
-        "resizable": true,
-        "title": "scrcpy-gui-tauri",
-        "width": 800,
-        "height": 600,
-        "minWidth": 600,
-        "minHeight": 400
-      }
-    ]
+    }
   }
 }

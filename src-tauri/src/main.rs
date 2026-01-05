@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 struct DeviceMonitor {
     running: Arc<Mutex<bool>>,
@@ -42,8 +42,10 @@ async fn start_device_monitoring(
             let devices_set: HashSet<String> = devices.iter().cloned().collect();
 
             // Compare with previous devices
-            let mut previous_devices = current_devices_clone.lock().unwrap();
-            let previous_set = previous_devices.clone();
+            let previous_set = {
+                let previous_devices = current_devices_clone.lock().unwrap();
+                previous_devices.clone()
+            };
 
             // Find new devices
             let new_devices: Vec<String> = devices_set
@@ -58,18 +60,21 @@ async fn start_device_monitoring(
                 .collect();
 
             // Update current devices
-            *previous_devices = devices_set;
+            {
+                let mut previous_devices = current_devices_clone.lock().unwrap();
+                *previous_devices = devices_set;
+            }
 
             // Emit events
             if !new_devices.is_empty() {
                 app_handle
-                    .emit_all("device-connected", new_devices)
+                    .emit("device-connected", new_devices)
                     .unwrap_or_default();
             }
 
             if !removed_devices.is_empty() {
                 app_handle
-                    .emit_all("device-disconnected", removed_devices)
+                    .emit("device-disconnected", removed_devices)
                     .unwrap_or_default();
             }
 
@@ -141,9 +146,10 @@ fn main() {
             let current_devices_clone = monitor_state.current_devices.clone();
             
             tauri::async_runtime::spawn(async move {
-                let mut running = running_clone.lock().unwrap();
-                *running = true;
-                drop(running);
+                {
+                    let mut running = running_clone.lock().unwrap();
+                    *running = true;
+                }
 
                 loop {
                     // Check if we should stop
@@ -159,8 +165,10 @@ fn main() {
                     let devices_set: HashSet<String> = devices.iter().cloned().collect();
 
                     // Compare with previous devices
-                    let mut previous_devices = current_devices_clone.lock().unwrap();
-                    let previous_set = previous_devices.clone();
+                    let previous_set = {
+                        let previous_devices = current_devices_clone.lock().unwrap();
+                        previous_devices.clone()
+                    };
 
                     // Find new devices
                     let new_devices: Vec<String> = devices_set
@@ -175,18 +183,21 @@ fn main() {
                         .collect();
 
                     // Update current devices
-                    *previous_devices = devices_set;
+                    {
+                        let mut previous_devices = current_devices_clone.lock().unwrap();
+                        *previous_devices = devices_set;
+                    }
 
                     // Emit events
                     if !new_devices.is_empty() {
                         app_handle
-                            .emit_all("device-connected", new_devices)
+                            .emit("device-connected", new_devices)
                             .unwrap_or_default();
                     }
 
                     if !removed_devices.is_empty() {
                         app_handle
-                            .emit_all("device-disconnected", removed_devices)
+                            .emit("device-disconnected", removed_devices)
                             .unwrap_or_default();
                     }
 
