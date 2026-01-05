@@ -1,8 +1,8 @@
 [package]
-name = "scrcpy-gui-tauri"
-version = "0.0.0"
-description = "A Tauri App"
-authors = ["you"]
+name = "scrcpy-gui"
+version = "1.0.0"
+description = "A GUI for Scrcpy built with Tauri"
+authors = ["ThinhBuzz"]
 license = ""
 repository = ""
 edition = "2021"

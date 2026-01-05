@@ -1,7 +1,7 @@
 {
   "productName": "scrcpy-gui-tauri",
-  "version": "0.0.1",
-  "identifier": "me.thinhbuzz",
+  "version": "1.0.0",
+  "identifier": "me.thinhbuzz.scrcpygui",
   "build": {
     "beforeDevCommand": "bun run dev",
     "beforeBuildCommand": "bun run build",
@@ -25,7 +25,7 @@
         "label": "main",
         "fullscreen": false,
         "resizable": true,
-        "title": "scrcpy-gui-tauri",
+        "title": "Scrcpy GUI",
         "width": 800,
         "height": 600,
         "minWidth": 600,
