@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { VNodeRef, onBeforeMount, onMounted, ref } from "vue";
+import { VNodeRef, onMounted, onUnmounted, ref } from "vue";
 import {
   CheckboxGroup,
   Button,
@@ -9,6 +9,7 @@ import {
 } from "ant-design-vue";
 import { useStorage } from "@vueuse/core";
 import { Child } from "@tauri-apps/api/shell";
+import { listen } from "@tauri-apps/api/event";
 
 import { initializePlatform, getDevices, startScrcpy } from "../commands";
 const selectedDevices = useStorage<string[]>("selectedDevices", [], undefined, {
@@ -48,9 +49,76 @@ const refreshDevices = (): void => {
 const selectAllDevices = (isSelect: boolean): void => {
   selectedDevices.value = isSelect ? [...availableDevices.value] : [];
 };
+let deviceConnectedUnlisten: (() => void) | null = null;
+let deviceDisconnectedUnlisten: (() => void) | null = null;
+
 onMounted(async () => {
   await initializePlatform();
   refreshDevices();
+
+  // Listen for device connection events
+  deviceConnectedUnlisten = await listen<string[]>(
+    "device-connected",
+    (event) => {
+      const newDevices = event.payload;
+      writeLog(`Device(s) connected: ${newDevices.join(", ")}\n`);
+      
+      // Add new devices to the list
+      newDevices.forEach((deviceId) => {
+        if (availableDevices.value.indexOf(deviceId) === -1) {
+          availableDevices.value.push(deviceId);
+        }
+      });
+      
+      // Refresh to ensure we have the latest state
+      refreshDevices();
+    }
+  );
+
+  // Listen for device disconnection events
+  deviceDisconnectedUnlisten = await listen<string[]>(
+    "device-disconnected",
+    (event) => {
+      const removedDevices = event.payload;
+      writeLog(`Device(s) disconnected: ${removedDevices.join(", ")}\n`);
+      
+      // Remove disconnected devices from the list
+      removedDevices.forEach((deviceId) => {
+        const index = availableDevices.value.indexOf(deviceId);
+        if (index !== -1) {
+          availableDevices.value.splice(index, 1);
+        }
+        
+        // Also remove from selected devices if selected
+        const selectedIndex = selectedDevices.value.indexOf(deviceId);
+        if (selectedIndex !== -1) {
+          selectedDevices.value.splice(selectedIndex, 1);
+        }
+        
+        // Stop scrcpy if it's running for this device
+        const startedIndex = startedDevices.value.findIndex(
+          (item) => item.deviceId === deviceId
+        );
+        if (startedIndex !== -1) {
+          startedDevices.value[startedIndex].process.kill();
+          startedDevices.value.splice(startedIndex, 1);
+        }
+      });
+      
+      // Refresh to ensure we have the latest state
+      refreshDevices();
+    }
+  );
+});
+
+onUnmounted(() => {
+  // Clean up event listeners
+  if (deviceConnectedUnlisten) {
+    deviceConnectedUnlisten();
+  }
+  if (deviceDisconnectedUnlisten) {
+    deviceDisconnectedUnlisten();
+  }
 });
 
 const availableOptions: CheckboxOptionType[] = [
