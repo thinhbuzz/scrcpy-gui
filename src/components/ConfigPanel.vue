@@ -39,12 +39,11 @@ const writeLog = (line: string): void => {
   }
 };
 const refreshDevices = async (): Promise<void> => {
-  availableDevices.value = [];
-  await getDevices((deviceId: string): void => {
-    if (availableDevices.value.indexOf(deviceId) === -1) {
-      availableDevices.value.push(deviceId);
-    }
-  }, writeLog);
+  const devices = await getDevices();
+  // Merge or replace? Replacing is cleaner for a refresh.
+  // But we want to preserve selection if possible (handled separately by keys, but here we just update available devices)
+  availableDevices.value = devices;
+  writeLog(`Refreshed device list. Found ${devices.length} device(s).\n`);
 };
 const selectAllDevices = (isSelect: boolean): void => {
   selectedDevices.value = isSelect ? [...availableDevices.value] : [];

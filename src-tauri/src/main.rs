@@ -2,13 +2,23 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashSet;
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
+use tokio::process::Command;
 
+#[derive(Default)]
 struct DeviceMonitor {
-    running: Arc<Mutex<bool>>,
+    // We don't need 'running' mutex for the command anymore if we just have one background task
+    // But we might want to stop it? For now, let's keep it simple.
+    // Making it global state to allow "stop" if needed.
+    monitoring: Arc<Mutex<bool>>,
     current_devices: Arc<Mutex<HashSet<String>>>,
+}
+
+#[tauri::command]
+async fn get_connected_devices(monitor: State<'_, DeviceMonitor>) -> Result<Vec<String>, String> {
+    let devices = monitor.current_devices.lock().map_err(|e| e.to_string())?;
+    Ok(devices.iter().cloned().collect())
 }
 
 #[tauri::command]
@@ -16,92 +26,101 @@ async fn start_device_monitoring(
     app: tauri::AppHandle,
     monitor: State<'_, DeviceMonitor>,
 ) -> Result<(), String> {
-    let mut running = monitor.running.lock().unwrap();
-    if *running {
-        return Ok(()); // Already running
+    let mut monitoring = monitor.monitoring.lock().map_err(|e| e.to_string())?;
+    if *monitoring {
+        return Ok(());
     }
-    *running = true;
-    drop(running);
+    *monitoring = true;
 
-    let app_handle = app.clone();
-    let running_clone = monitor.running.clone();
-    let current_devices_clone = monitor.current_devices.clone();
+    // We don't drop the lock immediately if we want to be strict, but for spawning we do.
+    drop(monitoring);
 
-    tokio::spawn(async move {
-        loop {
-            // Check if we should stop
-            {
-                let running = running_clone.lock().unwrap();
-                if !*running {
-                    break;
-                }
-            }
-
-            // Get current devices
-            let devices = get_adb_devices().unwrap_or_default();
-            let devices_set: HashSet<String> = devices.iter().cloned().collect();
-
-            // Compare with previous devices
-            let previous_set = {
-                let previous_devices = current_devices_clone.lock().unwrap();
-                previous_devices.clone()
-            };
-
-            // Find new devices
-            let new_devices: Vec<String> = devices_set.difference(&previous_set).cloned().collect();
-
-            // Find removed devices
-            let removed_devices: Vec<String> =
-                previous_set.difference(&devices_set).cloned().collect();
-
-            // Update current devices
-            {
-                let mut previous_devices = current_devices_clone.lock().unwrap();
-                *previous_devices = devices_set;
-            }
-
-            // Emit events
-            if !new_devices.is_empty() {
-                app_handle
-                    .emit("device-connected", new_devices)
-                    .unwrap_or_default();
-            }
-
-            if !removed_devices.is_empty() {
-                app_handle
-                    .emit("device-disconnected", removed_devices)
-                    .unwrap_or_default();
-            }
-
-            // Wait 2 seconds before next check
-            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        }
-    });
-
+    spawn_monitor_loop(app, monitor.clone());
     Ok(())
 }
 
 #[tauri::command]
 async fn stop_device_monitoring(monitor: State<'_, DeviceMonitor>) -> Result<(), String> {
-    let mut running = monitor.running.lock().unwrap();
-    *running = false;
+    let mut monitoring = monitor.monitoring.lock().map_err(|e| e.to_string())?;
+    *monitoring = false;
     Ok(())
 }
 
-fn get_adb_devices() -> Result<Vec<String>, String> {
-    // Determine binary extension based on platform
+fn spawn_monitor_loop(app: tauri::AppHandle, monitor_state: State<'_, DeviceMonitor>) {
+    let monitoring = monitor_state.monitoring.clone();
+    let current_devices = monitor_state.current_devices.clone();
+
+    tauri::async_runtime::spawn(async move {
+        loop {
+            // Check if we should stop
+            {
+                let is_monitoring = monitoring.lock().unwrap();
+                if !*is_monitoring {
+                    break;
+                }
+            }
+
+            // Get current devices
+            let devices = match get_adb_devices().await {
+                Ok(devs) => devs,
+                Err(e) => {
+                    eprintln!("Error fetching devices: {}", e);
+                    Vec::new()
+                }
+            };
+
+            let devices_set: HashSet<String> = devices.iter().cloned().collect();
+
+            // Compare with previous devices
+            let (new_devices, removed_devices) = {
+                let mut previous_devices = current_devices.lock().unwrap();
+
+                let new_devs: Vec<String> =
+                    devices_set.difference(&previous_devices).cloned().collect();
+
+                let removed_devs: Vec<String> =
+                    previous_devices.difference(&devices_set).cloned().collect();
+
+                // Update state
+                *previous_devices = devices_set;
+
+                (new_devs, removed_devs)
+            };
+
+            // Emit events
+            if !new_devices.is_empty() {
+                let _ = app.emit("device-connected", new_devices);
+            }
+
+            if !removed_devices.is_empty() {
+                let _ = app.emit("device-disconnected", removed_devices);
+            }
+
+            // Wait 2 seconds
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        }
+    });
+}
+
+async fn get_adb_devices() -> Result<Vec<String>, String> {
     let binary_ext = if cfg!(target_os = "windows") {
         ".exe"
     } else {
         ""
     };
 
-    use std::os::windows::process::CommandExt;
+    let mut command = Command::new(format!("adb{}", binary_ext));
 
-    let output = Command::new(format!("adb{}", binary_ext))
-        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+    // Windows-specific: CREATE_NO_WINDOW
+    #[cfg(target_os = "windows")]
+    {
+        command.creation_flags(0x08000000);
+    }
+
+    let output = command
         .arg("devices")
         .output()
+        .await
         .map_err(|e| format!("Failed to execute adb: {}", e))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -113,7 +132,6 @@ fn get_adb_devices() -> Result<Vec<String>, String> {
             continue;
         }
 
-        // Parse line like "ABC123    device"
         if let Some(device_id) = line.split_whitespace().next() {
             if line.contains("device") && !device_id.is_empty() {
                 devices.push(device_id.to_string());
@@ -128,77 +146,23 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_os::init())
-        .manage(DeviceMonitor {
-            running: Arc::new(Mutex::new(false)),
-            current_devices: Arc::new(Mutex::new(HashSet::new())),
-        })
+        .manage(DeviceMonitor::default())
         .invoke_handler(tauri::generate_handler![
             start_device_monitoring,
-            stop_device_monitoring
+            stop_device_monitoring,
+            get_connected_devices
         ])
         .setup(|app| {
-            // Auto-start monitoring when app starts
-            let app_handle = app.handle().clone();
             let monitor_state = app.state::<DeviceMonitor>();
-            let running_clone = monitor_state.running.clone();
-            let current_devices_clone = monitor_state.current_devices.clone();
 
-            tauri::async_runtime::spawn(async move {
-                {
-                    let mut running = running_clone.lock().unwrap();
-                    *running = true;
-                }
+            // Start monitoring automatically
+            {
+                let mut monitoring = monitor_state.monitoring.lock().unwrap();
+                *monitoring = true;
+            }
 
-                loop {
-                    // Check if we should stop
-                    {
-                        let running = running_clone.lock().unwrap();
-                        if !*running {
-                            break;
-                        }
-                    }
+            spawn_monitor_loop(app.handle().clone(), monitor_state.clone());
 
-                    // Get current devices
-                    let devices = get_adb_devices().unwrap_or_default();
-                    let devices_set: HashSet<String> = devices.iter().cloned().collect();
-
-                    // Compare with previous devices
-                    let previous_set = {
-                        let previous_devices = current_devices_clone.lock().unwrap();
-                        previous_devices.clone()
-                    };
-
-                    // Find new devices
-                    let new_devices: Vec<String> =
-                        devices_set.difference(&previous_set).cloned().collect();
-
-                    // Find removed devices
-                    let removed_devices: Vec<String> =
-                        previous_set.difference(&devices_set).cloned().collect();
-
-                    // Update current devices
-                    {
-                        let mut previous_devices = current_devices_clone.lock().unwrap();
-                        *previous_devices = devices_set;
-                    }
-
-                    // Emit events
-                    if !new_devices.is_empty() {
-                        app_handle
-                            .emit("device-connected", new_devices)
-                            .unwrap_or_default();
-                    }
-
-                    if !removed_devices.is_empty() {
-                        app_handle
-                            .emit("device-disconnected", removed_devices)
-                            .unwrap_or_default();
-                    }
-
-                    // Wait 2 seconds before next check
-                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                }
-            });
             Ok(())
         })
         .run(tauri::generate_context!())

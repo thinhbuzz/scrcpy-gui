@@ -1,5 +1,6 @@
 import { Command, type Child } from "@tauri-apps/plugin-shell";
 import { platform } from "@tauri-apps/plugin-os";
+import { invoke } from "@tauri-apps/api/core";
 
 let _binaryExtension: string | null = null;
 let _platformType: string | null = null;
@@ -35,32 +36,19 @@ export function getPlatformType(): string | null {
   return _platformType;
 }
 
-export const executeAdbDevices = async (callback: (line: string) => void): Promise<void> => {
-  const command = Command.create("adb" + getBinaryExtension(), ["devices"]);
-  command.on("error", callback);
-  command.stdout.on("data", callback);
-  command.stderr.on("data", callback);
-
-  await command.spawn();
-};
-
-export const getDevices = async (
-  callback: (line: string) => void,
-  log?: (line: string) => void
-): Promise<void> => {
-  await executeAdbDevices((line) => {
-    log?.(line);
-    const [, deviceId] = line.trim().match(/(.*)\s+device$/) || [];
-    if (deviceId) {
-      callback(deviceId);
-    }
-  });
+export const getDevices = async (): Promise<string[]> => {
+  try {
+    return await invoke<string[]>("get_connected_devices");
+  } catch (error) {
+    console.error("Failed to get connected devices:", error);
+    return [];
+  }
 };
 
 export const startScrcpy = async (
   args: string[],
   callback: (line: string) => void,
-  onClose: (data: {code: number | null, signal: number | null}) => void
+  onClose: (data: { code: number | null, signal: number | null }) => void
 ): Promise<Child> => {
   const command = Command.create("scrcpy" + getBinaryExtension(), args);
   command.on("error", callback);
