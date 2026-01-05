@@ -13,6 +13,7 @@ const internalValue = ref("");
 watch(
   () => props.logLines,
   (newLines) => {
+    console.log(`[LogViewer] Props updated. Total lines: ${newLines.length}`);
     // Limit to last 1000 lines to prevent performance issues
     const validLines = newLines.slice(-1000);
     internalValue.value = validLines.join("");

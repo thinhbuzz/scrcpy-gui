@@ -1,4 +1,3 @@
-import { Command, type Child } from "@tauri-apps/plugin-shell";
 import { platform } from "@tauri-apps/plugin-os";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -46,15 +45,12 @@ export const getDevices = async (): Promise<string[]> => {
 };
 
 export const startScrcpy = async (
-  args: string[],
-  callback: (line: string) => void,
-  onClose: (data: { code: number | null, signal: number | null }) => void
-): Promise<Child> => {
-  const command = Command.create("scrcpy" + getBinaryExtension(), args);
-  command.on("error", callback);
-  command.on('close', onClose);
-  command.stdout.on("data", callback);
-  command.stderr.on("data", callback);
+  deviceId: string,
+  args: string[]
+): Promise<void> => {
+  await invoke("start_scrcpy", { deviceId, args });
+};
 
-  return await command.spawn();
+export const stopScrcpy = async (deviceId: string): Promise<void> => {
+  await invoke("stop_scrcpy", { deviceId });
 };

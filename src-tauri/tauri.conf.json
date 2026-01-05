@@ -34,7 +34,8 @@
     ],
     "security": {
       "capabilities": [
-        "shell-access"
+        "shell-access",
+        "default"
       ],
       "csp": null
     }

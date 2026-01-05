@@ -7,37 +7,7 @@
   ],
   "permissions": [
     "shell:allow-open",
-    "shell:allow-kill",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        {
-          "name": "scrcpy",
-          "cmd": "scrcpy",
-          "args": true
-        },
-        {
-          "name": "scrcpy.exe",
-          "cmd": "scrcpy.exe",
-          "args": true
-        }
-      ]
-    },
-    {
-      "identifier": "shell:allow-spawn",
-      "allow": [
-        {
-          "name": "scrcpy",
-          "cmd": "scrcpy",
-          "args": true
-        },
-        {
-          "name": "scrcpy.exe",
-          "cmd": "scrcpy.exe",
-          "args": true
-        }
-      ]
-    }
+    "shell:allow-kill"
   ],
   "platforms": [
     "windows",

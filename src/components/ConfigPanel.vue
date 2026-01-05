@@ -7,10 +7,8 @@ import {
   InputNumber,
 } from "ant-design-vue";
 import { useStorage } from "@vueuse/core";
-import { type Child } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
-
-import { initializePlatform, getDevices, startScrcpy } from "../commands";
+import { initializePlatform, getDevices, startScrcpy, stopScrcpy } from "../commands";
 import LogViewer from "./LogViewer.vue";
 import DeviceList from "./DeviceList.vue";
 
@@ -29,12 +27,15 @@ const selectedOptions = useStorage<string[]>(
   }
 );
 const availableDevices = ref<string[]>([]);
-const startedDevices = ref<{ deviceId: string; process: Child }[]>([]);
+const startedDevices = ref<string[]>([]);
 
 // Log management
 const logLines = ref<string[]>([]);
 const writeLog = (line: string): void => {
   logLines.value.push(line);
+  if (logLines.value.length > 1000) {
+    logLines.value = logLines.value.slice(-1000);
+  }
 };
 
 const refreshDevices = async (): Promise<void> => {
@@ -45,6 +46,13 @@ const refreshDevices = async (): Promise<void> => {
 
 let deviceConnectedUnlisten: (() => void) | null = null;
 let deviceDisconnectedUnlisten: (() => void) | null = null;
+let scrcpyLogUnlisten: (() => void) | null = null;
+let scrcpyExitUnlisten: (() => void) | null = null;
+
+interface LogPayload {
+  deviceId: string;
+  message: string;
+}
 
 onMounted(async () => {
   await initializePlatform();
@@ -55,6 +63,7 @@ onMounted(async () => {
     "device-connected",
     (event) => {
       const newDevices = event.payload;
+      console.log("[Frontend] Device(s) connected:", newDevices);
       writeLog(`Device(s) connected: ${newDevices.join(", ")}\n`);
       
       // Add new devices to the list
@@ -64,7 +73,6 @@ onMounted(async () => {
         }
       });
       
-      // Refresh to ensure we have the latest state
       refreshDevices();
     }
   );
@@ -74,45 +82,63 @@ onMounted(async () => {
     "device-disconnected",
     (event) => {
       const removedDevices = event.payload;
+      console.log("[Frontend] Device(s) disconnected:", removedDevices);
       writeLog(`Device(s) disconnected: ${removedDevices.join(", ")}\n`);
       
-      // Remove disconnected devices from the list
       removedDevices.forEach((deviceId) => {
         const index = availableDevices.value.indexOf(deviceId);
         if (index !== -1) {
           availableDevices.value.splice(index, 1);
         }
         
-        // Also remove from selected devices if selected
         const selectedIndex = selectedDevices.value.indexOf(deviceId);
         if (selectedIndex !== -1) {
           selectedDevices.value.splice(selectedIndex, 1);
         }
         
-        // Stop scrcpy if it's running for this device
-        const startedIndex = startedDevices.value.findIndex(
-          (item) => item.deviceId === deviceId
-        );
-        if (startedIndex !== -1) {
-          startedDevices.value[startedIndex].process.kill();
-          startedDevices.value.splice(startedIndex, 1);
+        if (startedDevices.value.includes(deviceId)) {
+          stopScrcpy(deviceId);
+          startedDevices.value = startedDevices.value.filter(id => id !== deviceId);
         }
       });
       
-      // Refresh to ensure we have the latest state
       refreshDevices();
+    }
+  );
+
+  // Listen for scrcpy logs from backend
+  try {
+    scrcpyLogUnlisten = await listen<LogPayload>(
+      "scrcpy-log",
+      (event) => {
+        const { deviceId, message } = event.payload;
+        console.log(`[Frontend] Log for ${deviceId}:`, message);
+        writeLog(`[${deviceId}] ${message}`);
+      }
+    );
+    writeLog("[Frontend] Scrcpy log listener established.\n");
+  } catch (e) {
+    writeLog(`[Frontend] Error setting up log listener: ${e}\n`);
+  }
+
+  // Listen for scrcpy exit from backend
+  scrcpyExitUnlisten = await listen<[string, number | null]>(
+    "scrcpy-exit",
+    (event) => {
+      const [deviceId, exitCode] = event.payload;
+      console.log(`[Frontend] Exit for ${deviceId}:`, exitCode);
+      writeLog(`Device ${deviceId} scrcpy exited with code ${exitCode ?? 'null'}\n`);
+      startedDevices.value = startedDevices.value.filter(id => id !== deviceId);
     }
   );
 });
 
 onUnmounted(() => {
   // Clean up event listeners
-  if (deviceConnectedUnlisten) {
-    deviceConnectedUnlisten();
-  }
-  if (deviceDisconnectedUnlisten) {
-    deviceDisconnectedUnlisten();
-  }
+  if (deviceConnectedUnlisten) deviceConnectedUnlisten();
+  if (deviceDisconnectedUnlisten) deviceDisconnectedUnlisten();
+  if (scrcpyLogUnlisten) scrcpyLogUnlisten();
+  if (scrcpyExitUnlisten) scrcpyExitUnlisten();
 });
 
 const availableOptions: CheckboxOptionType[] = [
@@ -127,42 +153,33 @@ const availableOptions: CheckboxOptionType[] = [
 ];
 
 const startProcess = async (): Promise<void> => {
-  await Promise.all(
-    selectedDevices.value
-      .filter((deviceId) => {
-        return (
-          availableDevices.value.indexOf(deviceId) !== -1 &&
-          startedDevices.value.findIndex(
-            (item) => item.deviceId === deviceId
-          ) === -1
-        );
-      })
-      .map((deviceId) => {
-        return startScrcpy(
-          ["-s", deviceId]
-            .concat(selectedOptions.value)
-            .concat(["--max-fps", selectedFPS.value.toString()]),
-          writeLog,
-          (data) => {
-            writeLog(
-              `Device ${deviceId} disconnected with code ${data.code ?? 'null'} and signal ${data.signal ?? 'null'}\n`
-            );
-            startedDevices.value = startedDevices.value.filter(
-              (item) => item.deviceId !== deviceId
-            );
-          }
-        ).then((child) => {
-          startedDevices.value.push({ deviceId, process: child });
-        });
-      })
-  );
+  const toStart = selectedDevices.value.filter((deviceId) => {
+    return availableDevices.value.includes(deviceId) && !startedDevices.value.includes(deviceId);
+  });
+
+  for (const deviceId of toStart) {
+    const args = ["-s", deviceId]
+      .concat(selectedOptions.value)
+      .concat(["--max-fps", selectedFPS.value.toString()]);
+    
+    try {
+      writeLog(`[Frontend] Requesting start for ${deviceId}...\n`);
+      await startScrcpy(deviceId, args);
+      startedDevices.value.push(deviceId);
+    } catch (error) {
+      writeLog(`Error starting ${deviceId}: ${error}\n`);
+    }
+  }
 };
+
 const stopProcesses = async (): Promise<void> => {
-  await Promise.all(
-    startedDevices.value.map(({ process }) => {
-      return process.kill();
-    })
-  );
+  for (const deviceId of startedDevices.value) {
+    try {
+      await stopScrcpy(deviceId);
+    } catch (error) {
+      writeLog(`Failed to stop scrcpy for ${deviceId}: ${error}\n`);
+    }
+  }
   startedDevices.value = [];
 };
 </script>

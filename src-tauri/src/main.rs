@@ -1,32 +1,32 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
-use tokio::process::Command;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::{Child, Command};
 
-#[derive(Default)]
-struct DeviceMonitor {
-    // We don't need 'running' mutex for the command anymore if we just have one background task
-    // But we might want to stop it? For now, let's keep it simple.
-    // Making it global state to allow "stop" if needed.
+#[derive(Default, Clone)]
+struct AppState {
     monitoring: Arc<Mutex<bool>>,
     current_devices: Arc<Mutex<HashSet<String>>>,
+    // Track running scrcpy processes by device ID
+    scrcpy_processes: Arc<Mutex<HashMap<String, Arc<Mutex<Option<Child>>>>>>,
 }
 
 #[tauri::command]
-async fn get_connected_devices(monitor: State<'_, DeviceMonitor>) -> Result<Vec<String>, String> {
-    let devices = monitor.current_devices.lock().map_err(|e| e.to_string())?;
+async fn get_connected_devices(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let devices = state.current_devices.lock().map_err(|e| e.to_string())?;
     Ok(devices.iter().cloned().collect())
 }
 
 #[tauri::command]
 async fn start_device_monitoring(
     app: tauri::AppHandle,
-    monitor: State<'_, DeviceMonitor>,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut monitoring = monitor.monitoring.lock().map_err(|e| e.to_string())?;
+    let mut monitoring = state.monitoring.lock().map_err(|e| e.to_string())?;
     if *monitoring {
         return Ok(());
     }
@@ -35,20 +35,213 @@ async fn start_device_monitoring(
     // We don't drop the lock immediately if we want to be strict, but for spawning we do.
     drop(monitoring);
 
-    spawn_monitor_loop(app, monitor.clone());
+    spawn_monitor_loop(app, state.inner().clone());
     Ok(())
 }
 
 #[tauri::command]
-async fn stop_device_monitoring(monitor: State<'_, DeviceMonitor>) -> Result<(), String> {
-    let mut monitoring = monitor.monitoring.lock().map_err(|e| e.to_string())?;
+async fn stop_device_monitoring(state: State<'_, AppState>) -> Result<(), String> {
+    let mut monitoring = state.monitoring.lock().map_err(|e| e.to_string())?;
     *monitoring = false;
     Ok(())
 }
 
-fn spawn_monitor_loop(app: tauri::AppHandle, monitor_state: State<'_, DeviceMonitor>) {
-    let monitoring = monitor_state.monitoring.clone();
-    let current_devices = monitor_state.current_devices.clone();
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct LogPayload {
+    device_id: String,
+    message: String,
+}
+
+#[tauri::command]
+async fn start_scrcpy(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    device_id: String,
+    args: Vec<String>,
+) -> Result<(), String> {
+    println!("[Backend] Received start_scrcpy request for {}", device_id);
+    {
+        let processes = state.scrcpy_processes.lock().map_err(|e| e.to_string())?;
+        if processes.contains_key(&device_id) {
+            return Err("Scrcpy is already running for this device".to_string());
+        }
+    }
+
+    let binary_ext = if cfg!(target_os = "windows") {
+        ".exe"
+    } else {
+        ""
+    };
+    let mut command = Command::new(format!("scrcpy{}", binary_ext));
+
+    #[cfg(target_os = "windows")]
+    {
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    command.args(&args);
+    command.stdout(std::process::Stdio::piped());
+    command.stderr(std::process::Stdio::piped());
+
+    println!(
+        "[Backend] Spawning scrcpy for {} with args: {:?}",
+        device_id, args
+    );
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Failed to spawn scrcpy: {}", e))?;
+
+    let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
+    let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
+
+    let child_arc = Arc::new(Mutex::new(Some(child)));
+    {
+        let mut processes = state.scrcpy_processes.lock().map_err(|e| e.to_string())?;
+        processes.insert(device_id.clone(), child_arc.clone());
+    }
+
+    // Initial log to confirm start
+    let _ = app.emit(
+        "scrcpy-log",
+        LogPayload {
+            device_id: device_id.clone(),
+            message: format!("[Backend] Starting scrcpy for {}...\n", device_id),
+        },
+    );
+
+    let app_handle = app.clone();
+    let device_id_log = device_id.clone();
+    let device_id_event = device_id.clone();
+    let state_clone = state.inner().clone();
+
+    // Spawn log readers
+    let mut reader_out = BufReader::new(stdout);
+    let mut reader_err = BufReader::new(stderr);
+
+    let app_handle_out = app_handle.clone();
+    let device_id_out = device_id_log.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut line = String::new();
+        loop {
+            match reader_out.read_line(&mut line).await {
+                Ok(0) => break,
+                Ok(_) => {
+                    println!("[{}] stdout: {}", device_id_out, line);
+                    let _ = app_handle_out.emit(
+                        "scrcpy-log",
+                        LogPayload {
+                            device_id: device_id_out.clone(),
+                            message: line.clone(),
+                        },
+                    );
+                    line.clear();
+                }
+                Err(e) => {
+                    eprintln!("[{}] stdout error: {}", device_id_out, e);
+                    break;
+                }
+            }
+        }
+    });
+
+    let app_handle_err = app_handle.clone();
+    let device_id_err = device_id_log.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut line = String::new();
+        loop {
+            match reader_err.read_line(&mut line).await {
+                Ok(0) => break,
+                Ok(_) => {
+                    println!("[{}] stderr: {}", device_id_err, line);
+                    let _ = app_handle_err.emit(
+                        "scrcpy-log",
+                        LogPayload {
+                            device_id: device_id_err.clone(),
+                            message: line.clone(),
+                        },
+                    );
+                    line.clear();
+                }
+                Err(e) => {
+                    eprintln!("[{}] stderr error: {}", device_id_err, e);
+                    break;
+                }
+            }
+        }
+    });
+
+    // Monitor for exit via polling to allow external kill()
+    tauri::async_runtime::spawn(async move {
+        let mut exit_code_captured = None;
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+            let mut should_break = false;
+            {
+                let mut child_lock = child_arc.lock().unwrap();
+                if let Some(child) = child_lock.as_mut() {
+                    match child.try_wait() {
+                        Ok(Some(status)) => {
+                            exit_code_captured = status.code();
+                            let _ = child_lock.take();
+                            should_break = true;
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
+                            eprintln!("[Backend] Error waiting for process: {}", e);
+                            let _ = child_lock.take();
+                            should_break = true;
+                        }
+                    }
+                } else {
+                    should_break = true;
+                }
+            }
+            if should_break {
+                break;
+            }
+        }
+
+        {
+            let mut processes = state_clone.scrcpy_processes.lock().unwrap();
+            processes.remove(&device_id_event);
+        }
+
+        println!(
+            "[Backend] Scrcpy for {} exited with code {:?}",
+            device_id_event, exit_code_captured
+        );
+        let _ = app_handle.emit("scrcpy-exit", (device_id_event, exit_code_captured));
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn stop_scrcpy(state: State<'_, AppState>, device_id: String) -> Result<(), String> {
+    println!("Stopping scrcpy for {}", device_id);
+    let child_arc_opt = {
+        let mut processes = state.scrcpy_processes.lock().map_err(|e| e.to_string())?;
+        processes.remove(&device_id)
+    };
+
+    if let Some(child_arc) = child_arc_opt {
+        let child_opt = {
+            let mut child_lock = child_arc.lock().unwrap();
+            child_lock.take()
+        };
+        if let Some(mut child) = child_opt {
+            let _ = child.kill().await;
+        }
+    }
+    Ok(())
+}
+
+fn spawn_monitor_loop(app: tauri::AppHandle, state: AppState) {
+    let monitoring = state.monitoring.clone();
+    let current_devices = state.current_devices.clone();
 
     tauri::async_runtime::spawn(async move {
         loop {
@@ -108,7 +301,6 @@ async fn get_adb_devices() -> Result<Vec<String>, String> {
     } else {
         ""
     };
-
     let mut command = Command::new(format!("adb{}", binary_ext));
 
     // Windows-specific: CREATE_NO_WINDOW
@@ -146,22 +338,24 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_os::init())
-        .manage(DeviceMonitor::default())
+        .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             start_device_monitoring,
             stop_device_monitoring,
-            get_connected_devices
+            get_connected_devices,
+            start_scrcpy,
+            stop_scrcpy
         ])
         .setup(|app| {
-            let monitor_state = app.state::<DeviceMonitor>();
+            let state = app.state::<AppState>();
 
             // Start monitoring automatically
             {
-                let mut monitoring = monitor_state.monitoring.lock().unwrap();
+                let mut monitoring = state.monitoring.lock().unwrap();
                 *monitoring = true;
             }
 
-            spawn_monitor_loop(app.handle().clone(), monitor_state.clone());
+            spawn_monitor_loop(app.handle().clone(), state.inner().clone());
 
             Ok(())
         })
