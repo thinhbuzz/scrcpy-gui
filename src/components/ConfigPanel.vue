@@ -8,7 +8,7 @@ import {
   InputNumber,
 } from "ant-design-vue";
 import { useStorage } from "@vueuse/core";
-import { Child } from "@tauri-apps/api/shell";
+import { type Child } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
 
 import { initializePlatform, getDevices, startScrcpy } from "../commands";
@@ -38,9 +38,9 @@ const writeLog = (line: string): void => {
     textArea.scrollTop = textArea.scrollHeight;
   }
 };
-const refreshDevices = (): void => {
+const refreshDevices = async (): Promise<void> => {
   availableDevices.value = [];
-  getDevices((deviceId: string): void => {
+  await getDevices((deviceId: string): void => {
     if (availableDevices.value.indexOf(deviceId) === -1) {
       availableDevices.value.push(deviceId);
     }
@@ -151,7 +151,7 @@ const startProcess = async (): Promise<void> => {
           writeLog,
           (data) => {
             writeLog(
-              `Device ${deviceId} disconnected with code ${data.code} and signal ${data.signal}\n`
+              `Device ${deviceId} disconnected with code ${data.code ?? 'null'} and signal ${data.signal ?? 'null'}\n`
             );
             startedDevices.value = startedDevices.value.filter(
               (item) => item.deviceId !== deviceId

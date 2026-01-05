@@ -123,6 +123,8 @@ fn get_adb_devices() -> Result<Vec<String>, String> {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_os::init())
         .manage(DeviceMonitor {
             running: Arc::new(Mutex::new(false)),
             current_devices: Arc::new(Mutex::new(HashSet::new())),
