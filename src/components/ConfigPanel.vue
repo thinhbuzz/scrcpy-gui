@@ -10,7 +10,7 @@ import {
 import { useStorage } from "@vueuse/core";
 import { Child } from "@tauri-apps/api/shell";
 
-import { binaryExtension, getDevices, startScrcpy } from "../commands";
+import { initializePlatform, getDevices, startScrcpy } from "../commands";
 const selectedDevices = useStorage<string[]>("selectedDevices", [], undefined, {
   mergeDefaults: true,
 });
@@ -48,11 +48,9 @@ const refreshDevices = (): void => {
 const selectAllDevices = (isSelect: boolean): void => {
   selectedDevices.value = isSelect ? [...availableDevices.value] : [];
 };
-onMounted(() => {
+onMounted(async () => {
+  await initializePlatform();
   refreshDevices();
-});
-onBeforeMount(() => {
-  binaryExtension();
 });
 
 const availableOptions: CheckboxOptionType[] = [
