@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, nextTick, watch } from "vue";
+import { ref, nextTick, watch, computed } from "vue";
 import { Textarea } from "ant-design-vue";
 
 const props = defineProps<{
@@ -7,36 +7,28 @@ const props = defineProps<{
 }>();
 
 const logRef = ref<any>(undefined);
-const internalValue = ref("");
 
-// Watch for changes in logLines to update the text area content
+// Use a computed property to join log lines, limited to the last 1000 lines
+const internalValue = computed(() => props.logLines.slice(-1000).join(""));
+
+// Watch for changes in logLines to handle auto-scroll
 watch(
-  () => props.logLines,
-  (newLines) => {
-    console.log(`[LogViewer] Props updated. Total lines: ${newLines.length}`);
-    // Limit to last 1000 lines to prevent performance issues
-    const validLines = newLines.slice(-1000);
-    internalValue.value = validLines.join("");
-    
-    // Auto-scroll to bottom
+  () => props.logLines.length,
+  () => {
     nextTick(() => {
-      if (logRef.value && logRef.value.resizableTextArea) {
-        const textArea = logRef.value.resizableTextArea.textArea;
-        textArea.scrollTop = textArea.scrollHeight;
-      }
+      scrollToBottom();
     });
-  },
-  { deep: true }
+  }
 );
 
-defineExpose({
-  scrollToBottom: () => {
-    if (logRef.value && logRef.value.resizableTextArea) {
-      const textArea = logRef.value.resizableTextArea.textArea;
-      textArea.scrollTop = textArea.scrollHeight;
-    }
+const scrollToBottom = () => {
+  if (logRef.value && logRef.value.resizableTextArea) {
+    const textArea = logRef.value.resizableTextArea.textArea;
+    textArea.scrollTop = textArea.scrollHeight;
   }
-});
+};
+
+defineExpose({ scrollToBottom });
 </script>
 
 <template>

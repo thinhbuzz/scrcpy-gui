@@ -8,7 +8,7 @@ import {
 } from "ant-design-vue";
 import { useStorage } from "@vueuse/core";
 import { listen } from "@tauri-apps/api/event";
-import { initializePlatform, getDevices, startScrcpy, stopScrcpy } from "../commands";
+import { getDevices, startScrcpy, stopScrcpy } from "../commands";
 import LogViewer from "./LogViewer.vue";
 import DeviceList from "./DeviceList.vue";
 
@@ -34,14 +34,13 @@ const logLines = ref<string[]>([]);
 const writeLog = (line: string): void => {
   logLines.value.push(line);
   if (logLines.value.length > 1000) {
-    logLines.value = logLines.value.slice(-1000);
+    logLines.value.splice(0, logLines.value.length - 1000);
   }
 };
 
 const refreshDevices = async (): Promise<void> => {
   const devices = await getDevices();
   availableDevices.value = devices;
-  writeLog(`Refreshed device list. Found ${devices.length} device(s).\n`);
 };
 
 let deviceConnectedUnlisten: (() => void) | null = null;
@@ -55,7 +54,6 @@ interface LogPayload {
 }
 
 onMounted(async () => {
-  await initializePlatform();
   refreshDevices();
 
   // Listen for device connection events
@@ -63,16 +61,7 @@ onMounted(async () => {
     "device-connected",
     (event) => {
       const newDevices = event.payload;
-      console.log("[Frontend] Device(s) connected:", newDevices);
       writeLog(`Device(s) connected: ${newDevices.join(", ")}\n`);
-      
-      // Add new devices to the list
-      newDevices.forEach((deviceId) => {
-        if (availableDevices.value.indexOf(deviceId) === -1) {
-          availableDevices.value.push(deviceId);
-        }
-      });
-      
       refreshDevices();
     }
   );
@@ -82,22 +71,17 @@ onMounted(async () => {
     "device-disconnected",
     (event) => {
       const removedDevices = event.payload;
-      console.log("[Frontend] Device(s) disconnected:", removedDevices);
       writeLog(`Device(s) disconnected: ${removedDevices.join(", ")}\n`);
       
       removedDevices.forEach((deviceId) => {
-        const index = availableDevices.value.indexOf(deviceId);
-        if (index !== -1) {
-          availableDevices.value.splice(index, 1);
-        }
-        
+        // Remove from selected if disconnected
         const selectedIndex = selectedDevices.value.indexOf(deviceId);
         if (selectedIndex !== -1) {
           selectedDevices.value.splice(selectedIndex, 1);
         }
         
+        // Ensure process tracking is cleaned up
         if (startedDevices.value.includes(deviceId)) {
-          stopScrcpy(deviceId);
           startedDevices.value = startedDevices.value.filter(id => id !== deviceId);
         }
       });
@@ -112,11 +96,9 @@ onMounted(async () => {
       "scrcpy-log",
       (event) => {
         const { deviceId, message } = event.payload;
-        console.log(`[Frontend] Log for ${deviceId}:`, message);
         writeLog(`[${deviceId}] ${message}`);
       }
     );
-    writeLog("[Frontend] Scrcpy log listener established.\n");
   } catch (e) {
     writeLog(`[Frontend] Error setting up log listener: ${e}\n`);
   }
@@ -126,7 +108,6 @@ onMounted(async () => {
     "scrcpy-exit",
     (event) => {
       const [deviceId, exitCode] = event.payload;
-      console.log(`[Frontend] Exit for ${deviceId}:`, exitCode);
       writeLog(`Device ${deviceId} scrcpy exited with code ${exitCode ?? 'null'}\n`);
       startedDevices.value = startedDevices.value.filter(id => id !== deviceId);
     }
@@ -134,7 +115,6 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  // Clean up event listeners
   if (deviceConnectedUnlisten) deviceConnectedUnlisten();
   if (deviceDisconnectedUnlisten) deviceDisconnectedUnlisten();
   if (scrcpyLogUnlisten) scrcpyLogUnlisten();
