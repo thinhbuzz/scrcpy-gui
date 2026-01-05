@@ -1,5 +1,5 @@
 {
-  "productName": "scrcpy-gui-tauri",
+  "productName": "Scrcpy GUI",
   "version": "1.0.0",
   "identifier": "me.thinhbuzz.scrcpygui",
   "build": {
