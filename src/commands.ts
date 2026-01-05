@@ -3,7 +3,7 @@ import { type } from "@tauri-apps/api/os";
 
 let _binaryExtension = ".exe";
 export async function binaryExtension() {
-  if ((await type()) == "Windows_NT") {
+  if ((await type()) != "Windows_NT") {
     _binaryExtension = "";
   }
 }
