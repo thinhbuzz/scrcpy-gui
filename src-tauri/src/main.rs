@@ -220,10 +220,13 @@ async fn start_scrcpy(
         }
     };
 
-    {
-        if let Ok(mut child_lock) = child_arc.lock() {
-            if matches!(*child_lock, ProcessState::StopRequested) {
-                let _ = child.kill().await;
+    let stop_requested = match child_arc.lock() {
+        Ok(child_lock) => Some(matches!(*child_lock, ProcessState::StopRequested)),
+        Err(_) => None,
+    };
+
+    if stop_requested.is_none() {
+        let _ = child.kill().await;
         match state.scrcpy_processes.lock() {
             Ok(mut processes) => {
                 processes.remove(&device_id);
@@ -235,29 +238,60 @@ async fn start_scrcpy(
                 );
             }
         }
+        emit_app_log(&app, "[Backend] Failed to lock scrcpy process\n");
+        return Err("Failed to start scrcpy due to lock error".to_string());
+    }
+
+    if stop_requested == Some(true) {
+        let _ = child.kill().await;
+        match state.scrcpy_processes.lock() {
+            Ok(mut processes) => {
+                processes.remove(&device_id);
+            }
+            Err(err) => {
                 emit_app_log(
                     &app,
-                    format!("[Backend] Scrcpy start canceled for {}\n", device_id),
+                    format!("[Backend] Failed to lock scrcpy map: {}\n", err),
                 );
-                return Err("Scrcpy start canceled".to_string());
             }
-            *child_lock = ProcessState::Running(child);
-        } else {
-            let _ = child.kill().await;
-            match state.scrcpy_processes.lock() {
-                Ok(mut processes) => {
-                    processes.remove(&device_id);
-                }
-                Err(err) => {
-                    emit_app_log(
-                        &app,
-                        format!("[Backend] Failed to lock scrcpy map: {}\n", err),
-                    );
-                }
-            }
-            emit_app_log(&app, "[Backend] Failed to lock scrcpy process\n");
-            return Err("Failed to start scrcpy due to lock error".to_string());
         }
+        emit_app_log(
+            &app,
+            format!("[Backend] Scrcpy start canceled for {}\n", device_id),
+        );
+        return Err("Scrcpy start canceled".to_string());
+    }
+
+    let mut child_opt = Some(child);
+    let set_running = match child_arc.lock() {
+        Ok(mut child_lock) => {
+            if let Some(child) = child_opt.take() {
+                *child_lock = ProcessState::Running(child);
+                true
+            } else {
+                false
+            }
+        }
+        Err(_) => false,
+    };
+
+    if !set_running {
+        if let Some(mut child) = child_opt {
+            let _ = child.kill().await;
+        }
+        match state.scrcpy_processes.lock() {
+            Ok(mut processes) => {
+                processes.remove(&device_id);
+            }
+            Err(err) => {
+                emit_app_log(
+                    &app,
+                    format!("[Backend] Failed to lock scrcpy map: {}\n", err),
+                );
+            }
+        }
+        emit_app_log(&app, "[Backend] Failed to lock scrcpy process\n");
+        return Err("Failed to start scrcpy due to lock error".to_string());
     }
 
     let app_handle = app.clone();
