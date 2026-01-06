@@ -45,7 +45,7 @@ const toggleDeviceSelection = (deviceId: string, checked: boolean): void => {
         <Button
             danger
             size="small"
-            v-on:click="selectAllDevices(true)"
+            @click="selectAllDevices(true)"
             :disabled="!availableDevices.length"
           >
             Select All
@@ -53,12 +53,12 @@ const toggleDeviceSelection = (deviceId: string, checked: boolean): void => {
           <Button
             danger
             size="small"
-            v-on:click="selectAllDevices(false)"
+            @click="selectAllDevices(false)"
             :disabled="!availableDevices.length"
           >
             UnSelect All
           </Button>
-          <Button type="primary" size="small" v-on:click="emit('refresh')">
+          <Button type="primary" size="small" @click="emit('refresh')">
             Refresh
           </Button>
       </div>
@@ -105,16 +105,18 @@ const toggleDeviceSelection = (deviceId: string, checked: boolean): void => {
 <style lang="scss" scoped>
 .device-container {
   width: 100%;
-  max-width: 100%;
   .device-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 10px;
+    gap: 8px;
+    flex-wrap: wrap;
     
     .header-buttons {
       display: flex;
       gap: 5px;
+      flex-wrap: wrap;
     }
   }
 }

@@ -255,9 +255,9 @@ const stopProcesses = async (): Promise<void> => {
 </script>
 
 <template>
-  <div class="config-pannel">
+  <div class="config-panel">
     <div class="config-column">
-      <div class="config-container common-box flex-item">
+      <div class="config-container common-box">
         <h3>Configurations</h3>
         <CheckboxGroup
           v-model:value="selectedOptions"
@@ -298,7 +298,7 @@ const stopProcesses = async (): Promise<void> => {
         @open-terminal="openTerminal"
       />
     </div>
-    <div class="log-column flex-item">
+    <div class="log-column">
       <div class="common-box log-panel">
         <h3>Logs</h3>
         <Tabs v-model:activeKey="activeLogTab" class="log-tabs">
@@ -314,7 +314,7 @@ const stopProcesses = async (): Promise<void> => {
   </div>
 </template>
 <style lang="scss" scoped>
-.config-pannel {
+.config-panel {
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -325,21 +325,19 @@ const stopProcesses = async (): Promise<void> => {
 .common-box {
   border: 1px solid #d9d9d9;
   padding: 16px;
-  margin-bottom: 16px;
-}
-.flex-item {
-  flex: 1;
 }
 
 .config-column {
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .log-column {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
 
 .log-panel {
