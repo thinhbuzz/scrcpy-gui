@@ -38,6 +38,7 @@ bun run tauri build
 
 - Connect devices via USB or TCP/IP and ensure they appear in `adb devices`.
 - Start will launch scrcpy for each selected device; Stop All terminates all running sessions.
+- The application is unsigned, so a warning will appear when running it. Please ignore that warning and continue using the application. On macOS, you can use the application https://github.com/alienator88/Sentinel to run unsigned software.
 
 ## Recommended IDE Setup
 
