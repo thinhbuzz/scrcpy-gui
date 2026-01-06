@@ -9,7 +9,9 @@
         "core:event:default",
         "core:window:default",
         "os:default",
-        "shell:default"
+        "shell:default",
+        "dialog:allow-open",
+        "dialog:allow-save"
     ],
     "platforms": [
         "windows",
