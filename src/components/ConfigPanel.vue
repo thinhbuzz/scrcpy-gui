@@ -349,6 +349,14 @@ const stopProcesses = async (): Promise<void> => {
 .log-tabs {
   flex: 1;
 }
+.log-tabs :deep(.ant-tabs-nav) {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.log-tabs :deep(.ant-tabs-nav-list) {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 
 .config-container {
   width: 100%;
