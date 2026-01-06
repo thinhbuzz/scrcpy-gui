@@ -14,3 +14,7 @@ export const startScrcpy = async (
 export const stopScrcpy = async (deviceId: string): Promise<void> => {
   await invoke("stop_scrcpy", { deviceId });
 };
+
+export const openDeviceTerminal = async (deviceId: string): Promise<void> => {
+  await invoke("open_device_terminal", { deviceId });
+};
