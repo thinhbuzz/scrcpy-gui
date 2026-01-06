@@ -15,6 +15,10 @@ export const stopScrcpy = async (deviceId: string): Promise<void> => {
   await invoke("stop_scrcpy", { deviceId });
 };
 
+export const openDeviceTerminal = async (deviceId: string): Promise<void> => {
+  await invoke("open_device_terminal", { deviceId });
+};
+
 export const setAdbPath = async (
   path: string | null
 ): Promise<void> => {

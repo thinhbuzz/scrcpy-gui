@@ -1,10 +1,11 @@
 <script lang="ts" setup>
-import { onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   CheckboxGroup,
   Button,
   CheckboxOptionType,
   InputNumber,
+  Tabs,
   Input,
 } from "ant-design-vue";
 import { useStorage } from "@vueuse/core";
@@ -14,6 +15,7 @@ import {
   downloadAndInstallScrcpy,
   getDevices,
   getToolPaths,
+  openDeviceTerminal,
   setAdbPath,
   setScrcpyPath,
   startScrcpy,
@@ -47,13 +49,34 @@ const availableDevices = ref<string[]>([]);
 const startedDevices = ref<string[]>([]);
 const isDownloadingScrcpy = ref(false);
 
+const maxLogLines = 1000;
+
 // Log management
-const logLines = ref<string[]>([]);
-const writeLog = (line: string): void => {
-  logLines.value.push(line);
-  if (logLines.value.length > 1000) {
-    logLines.value.splice(0, logLines.value.length - 1000);
+const systemLogLines = ref<string[]>([]);
+const deviceLogLines = ref<Record<string, string[]>>({});
+const activeLogTab = ref<string>("system");
+
+const trimLogLines = (lines: string[]): void => {
+  if (lines.length > maxLogLines) {
+    lines.splice(0, lines.length - maxLogLines);
   }
+};
+
+const appendSystemLog = (line: string): void => {
+  systemLogLines.value.push(line);
+  trimLogLines(systemLogLines.value);
+};
+
+const writeLog = (line: string): void => {
+  appendSystemLog(line);
+};
+
+const appendDeviceLog = (deviceId: string, line: string): void => {
+  if (!deviceLogLines.value[deviceId]) {
+    deviceLogLines.value[deviceId] = [];
+  }
+  deviceLogLines.value[deviceId].push(line);
+  trimLogLines(deviceLogLines.value[deviceId]);
 };
 
 const refreshDevices = async (): Promise<void> => {
@@ -61,7 +84,7 @@ const refreshDevices = async (): Promise<void> => {
     const devices = await getDevices();
     availableDevices.value = devices;
   } catch (error) {
-    writeLog(`Failed to get connected devices: ${error}\n`);
+    appendSystemLog(`Failed to get connected devices: ${error}\n`);
   }
 };
 
@@ -98,7 +121,7 @@ onMounted(async () => {
     "device-connected",
     (event) => {
       const newDevices = event.payload;
-      writeLog(`Device(s) connected: ${newDevices.join(", ")}\n`);
+      appendSystemLog(`Device(s) connected: ${newDevices.join(", ")}\n`);
       refreshDevices();
     }
   );
@@ -108,7 +131,7 @@ onMounted(async () => {
     "device-disconnected",
     (event) => {
       const removedDevices = event.payload;
-      writeLog(`Device(s) disconnected: ${removedDevices.join(", ")}\n`);
+      appendSystemLog(`Device(s) disconnected: ${removedDevices.join(", ")}\n`);
       
       removedDevices.forEach((deviceId) => {
         // Remove from selected if disconnected
@@ -120,9 +143,11 @@ onMounted(async () => {
         // Attempt to stop scrcpy if it is still running.
         if (startedDevices.value.includes(deviceId)) {
           stopScrcpy(deviceId).catch((error) => {
-            writeLog(`Failed to stop scrcpy for ${deviceId}: ${error}\n`);
+            appendSystemLog(`Failed to stop scrcpy for ${deviceId}: ${error}\n`);
           });
+          startedDevices.value = startedDevices.value.filter((id) => id !== deviceId);
         }
+
       });
       
       refreshDevices();
@@ -135,11 +160,11 @@ onMounted(async () => {
       "scrcpy-log",
       (event) => {
         const { deviceId, message } = event.payload;
-        writeLog(`[${deviceId}] ${message}`);
+        appendDeviceLog(deviceId, message);
       }
     );
   } catch (e) {
-    writeLog(`[Frontend] Error setting up log listener: ${e}\n`);
+    appendSystemLog(`[Frontend] Error setting up log listener: ${e}\n`);
   }
 
   // Listen for scrcpy exit from backend
@@ -147,13 +172,15 @@ onMounted(async () => {
     "scrcpy-exit",
     (event) => {
       const [deviceId, exitCode] = event.payload;
-      writeLog(`Device ${deviceId} scrcpy exited with code ${exitCode ?? 'null'}\n`);
+      appendSystemLog(
+        `Device ${deviceId} scrcpy exited with code ${exitCode ?? "null"}\n`
+      );
       startedDevices.value = startedDevices.value.filter(id => id !== deviceId);
     }
   );
 
   appLogUnlisten = await listen<string>("app-log", (event) => {
-    writeLog(event.payload);
+    appendSystemLog(event.payload);
   });
 });
 
@@ -265,43 +292,93 @@ const availableOptions: CheckboxOptionType[] = [
   { label: "Stay Awake", value: "--stay-awake" },
 ];
 
+const { TabPane } = Tabs;
+
+const logDeviceIds = computed(() => {
+  const ids = new Set<string>();
+  availableDevices.value.forEach((id) => ids.add(id));
+  Object.keys(deviceLogLines.value).forEach((id) => ids.add(id));
+  return Array.from(ids);
+});
+
+watch(
+  logDeviceIds,
+  (ids) => {
+    if (activeLogTab.value !== "system" && !ids.includes(activeLogTab.value)) {
+      activeLogTab.value = "system";
+    }
+  },
+  { immediate: true }
+);
+const openTerminal = async (deviceId: string): Promise<void> => {
+  try {
+    await openDeviceTerminal(deviceId);
+    appendSystemLog(`Opened terminal for ${deviceId}\n`);
+  } catch (error) {
+    appendSystemLog(`Failed to open terminal for ${deviceId}: ${error}\n`);
+  }
+};
+
+const openLog = (deviceId: string): void => {
+  activeLogTab.value = deviceId;
+};
+
+const startDevice = async (deviceId: string): Promise<void> => {
+  if (!availableDevices.value.includes(deviceId)) {
+    appendSystemLog(`Device ${deviceId} is not available.\n`);
+    return;
+  }
+  if (startedDevices.value.includes(deviceId)) {
+    return;
+  }
+
+  const args = ["-s", deviceId]
+    .concat(selectedOptions.value)
+    .concat(["--max-fps", selectedFPS.value.toString()]);
+
+  try {
+    appendSystemLog(`[Frontend] Requesting start for ${deviceId}...\n`);
+    await startScrcpy(deviceId, args);
+    startedDevices.value.push(deviceId);
+  } catch (error) {
+    appendSystemLog(`Error starting ${deviceId}: ${error}\n`);
+  }
+};
+
+const stopDevice = async (deviceId: string): Promise<void> => {
+  if (!startedDevices.value.includes(deviceId)) {
+    return;
+  }
+  try {
+    await stopScrcpy(deviceId);
+  } catch (error) {
+    appendSystemLog(`Failed to stop scrcpy for ${deviceId}: ${error}\n`);
+  } finally {
+    startedDevices.value = startedDevices.value.filter((id) => id !== deviceId);
+  }
+};
+
 const startProcess = async (): Promise<void> => {
   const toStart = selectedDevices.value.filter((deviceId) => {
     return availableDevices.value.includes(deviceId) && !startedDevices.value.includes(deviceId);
   });
 
   for (const deviceId of toStart) {
-    const args = ["-s", deviceId]
-      .concat(selectedOptions.value)
-      .concat(["--max-fps", selectedFPS.value.toString()]);
-    
-    try {
-      writeLog(`[Frontend] Requesting start for ${deviceId}...\n`);
-      await startScrcpy(deviceId, args);
-      startedDevices.value.push(deviceId);
-    } catch (error) {
-      writeLog(`Error starting ${deviceId}: ${error}\n`);
-    }
+    await startDevice(deviceId);
   }
 };
 
 const stopProcesses = async (): Promise<void> => {
-  for (const deviceId of startedDevices.value) {
-    try {
-      await stopScrcpy(deviceId);
-    } catch (error) {
-      writeLog(`Failed to stop scrcpy for ${deviceId}: ${error}\n`);
-    }
+  for (const deviceId of [...startedDevices.value]) {
+    await stopDevice(deviceId);
   }
-  startedDevices.value = [];
 };
 </script>
 
 <template>
-  <div class="config-pannel">
-    <LogViewer :log-lines="logLines" />
+  <div class="config-panel">
     <div class="config-column">
-      <div class="config-container common-box flex-item">
+      <div class="config-container common-box">
         <h3>Configurations</h3>
         <div class="adb-path">
           <label for="adb-path-input">ADB Path (optional)</label>
@@ -364,35 +441,74 @@ const stopProcesses = async (): Promise<void> => {
       </div>
       <DeviceList
         :availableDevices="availableDevices"
+        :startedDevices="startedDevices"
         v-model:selectedDevices="selectedDevices"
         @refresh="refreshDevices"
+        @start="startDevice"
+        @stop="stopDevice"
+        @open-log="openLog"
+        @open-terminal="openTerminal"
       />
+    </div>
+    <div class="log-column">
+      <div class="common-box log-panel">
+        <h3>Logs</h3>
+        <Tabs v-model:activeKey="activeLogTab" class="log-tabs">
+          <TabPane key="system" tab="System">
+            <LogViewer :log-lines="systemLogLines" title="" />
+          </TabPane>
+          <TabPane v-for="deviceId in logDeviceIds" :key="deviceId" :tab="deviceId">
+            <LogViewer :log-lines="deviceLogLines[deviceId] ?? []" title="" />
+          </TabPane>
+        </Tabs>
+      </div>
     </div>
   </div>
 </template>
 <style lang="scss" scoped>
-.config-pannel {
+.config-panel {
   padding: 10px;
   display: flex;
-  flex-direction: row;
-  flex-wrap: wrap-reverse;
-  justify-content: space-between;
+  flex-direction: column;
+  justify-content: flex-start;
   gap: 10px;
-  align-items: start;
+  align-items: stretch;
 }
 .common-box {
   border: 1px solid #d9d9d9;
   padding: 16px;
-  margin-bottom: 16px;
-}
-.flex-item {
-  flex: 1;
 }
 
 .config-column {
-  max-width: 600px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
+.log-column {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.log-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 320px;
+}
+
+.log-tabs {
+  flex: 1;
+}
+.log-tabs :deep(.ant-tabs-nav) {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.log-tabs :deep(.ant-tabs-nav-list) {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 
 .config-container {
   width: 100%;

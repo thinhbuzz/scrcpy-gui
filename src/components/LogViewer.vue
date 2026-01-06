@@ -4,6 +4,7 @@ import { Textarea } from "ant-design-vue";
 
 const props = defineProps<{
   logLines: string[];
+  title?: string;
 }>();
 
 const logRef = ref<any>(undefined);
@@ -32,8 +33,8 @@ defineExpose({ scrollToBottom });
 </script>
 
 <template>
-  <div class="log-container common-box flex-item">
-    <h3>Logs</h3>
+  <div class="log-container">
+    <h3 v-if="props.title !== ''">{{ props.title ?? "Logs" }}</h3>
     <div class="log-scroller">
       <Textarea
         :rows="20"

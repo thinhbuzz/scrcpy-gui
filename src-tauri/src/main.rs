@@ -3,8 +3,9 @@
 
 use std::collections::{HashMap, HashSet};
 use std::env;
+use std::fs;
 use std::io::ErrorKind;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -122,19 +123,6 @@ fn create_command_with_override(binary: &str, override_path: Option<&str>) -> Co
     create_command(binary)
 }
 
-fn read_adb_path(state: &AppState, app: &tauri::AppHandle) -> Option<String> {
-    match state.adb_path.lock() {
-        Ok(path) => path.clone(),
-        Err(err) => {
-            emit_app_log(
-                app,
-                format!("[Backend] Failed to lock adb path: {}\n", err),
-            );
-            None
-        }
-    }
-}
-
 fn resolve_or_read_adb_path(state: &AppState, app: &tauri::AppHandle) -> Option<String> {
     match state.adb_path.lock() {
         Ok(mut path) => {
@@ -150,19 +138,6 @@ fn resolve_or_read_adb_path(state: &AppState, app: &tauri::AppHandle) -> Option<
             emit_app_log(
                 app,
                 format!("[Backend] Failed to lock adb path: {}\n", err),
-            );
-            None
-        }
-    }
-}
-
-fn read_scrcpy_path(state: &AppState, app: &tauri::AppHandle) -> Option<String> {
-    match state.scrcpy_path.lock() {
-        Ok(path) => path.clone(),
-        Err(err) => {
-            emit_app_log(
-                app,
-                format!("[Backend] Failed to lock scrcpy path: {}\n", err),
             );
             None
         }
@@ -889,6 +864,155 @@ async fn stop_scrcpy(
     Ok(())
 }
 
+#[tauri::command]
+async fn open_device_terminal(
+    app: tauri::AppHandle,
+    device_id: String,
+) -> Result<(), String> {
+    let trimmed = device_id.trim();
+    if trimmed.is_empty() {
+        return Err("Device ID is empty".to_string());
+    }
+
+    if cfg!(target_os = "windows") {
+        open_windows_terminal(trimmed)
+    } else if cfg!(target_os = "macos") {
+        open_macos_terminal(trimmed)
+    } else {
+        open_linux_terminal(trimmed).map_err(|err| {
+            emit_app_log(
+                &app,
+                format!("[Backend] Failed to open terminal: {}\n", err),
+            );
+            err
+        })
+    }
+}
+
+fn open_windows_terminal(device_id: &str) -> Result<(), String> {
+    let command = format!(
+        "title {} & doskey adb=adb -s {} $*",
+        device_id, device_id
+    );
+    let mut cmd = Command::new("cmd");
+    cmd.args(["/c", "start", "", "cmd", "/k", &command]);
+
+    #[cfg(target_os = "windows")]
+    {
+        cmd.creation_flags(0x00000010); // CREATE_NEW_CONSOLE
+    }
+
+    cmd.spawn()
+        .map(|_| ())
+        .map_err(|err| format!("Failed to open Windows terminal: {}", err))
+}
+
+fn escape_applescript(input: &str) -> String {
+    input.replace('\\', "\\\\").replace('\"', "\\\"")
+}
+
+fn escape_shell_single(input: &str) -> String {
+    input.replace('\'', "'\\''")
+}
+
+fn open_macos_terminal(device_id: &str) -> Result<(), String> {
+    let escaped = escape_shell_single(device_id);
+    let command = format!(
+        "printf '\\033]0;{0}\\007'; alias adb='adb -s {0}'; echo 'adb => adb -s {0}'",
+        escaped
+    );
+    let script = format!(
+        "tell application \"Terminal\" to do script \"{}\"",
+        escape_applescript(&command)
+    );
+    Command::new("osascript")
+        .args(["-e", &script])
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| format!("Failed to open macOS Terminal: {}", err))
+}
+
+fn find_executable(name: &str) -> Option<PathBuf> {
+    let path_env = env::var_os("PATH")?;
+    for path in env::split_paths(&path_env) {
+        let full = path.join(name);
+        if full.is_file() {
+            return Some(full);
+        }
+    }
+    None
+}
+
+fn write_shell_rc(device_id: &str) -> Result<PathBuf, String> {
+    let escaped = escape_shell_single(device_id);
+    let content = format!(
+        "printf '\\033]0;{0}\\007'\nalias adb='adb -s {0}'\necho 'adb => adb -s {0}'\n",
+        escaped
+    );
+    let mut path = env::temp_dir();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|err| err.to_string())?
+        .as_millis();
+    path.push(format!("scrcpy-gui-adb-{}.rc", stamp));
+    fs::write(&path, content).map_err(|err| format!("Failed to write rc file: {}", err))?;
+    Ok(path)
+}
+
+fn open_linux_terminal(device_id: &str) -> Result<(), String> {
+    let rc_path = write_shell_rc(device_id)?;
+    let rc_path_str = rc_path.to_string_lossy().to_string();
+    let bash = find_executable("bash").unwrap_or_else(|| PathBuf::from("bash"));
+    let bash_str = bash.to_string_lossy().to_string();
+
+    let candidates = [
+        "x-terminal-emulator",
+        "gnome-terminal",
+        "konsole",
+        "xfce4-terminal",
+        "mate-terminal",
+        "lxterminal",
+        "xterm",
+        "alacritty",
+        "kitty",
+        "tilix",
+    ];
+
+    for terminal in candidates {
+        if find_executable(terminal).is_none() {
+            continue;
+        }
+
+        let mut command = Command::new(terminal);
+        match terminal {
+            "gnome-terminal" => {
+                command.args([
+                    "--",
+                    &bash_str,
+                    "--rcfile",
+                    &rc_path_str,
+                    "-i",
+                ]);
+            }
+            "xfce4-terminal" | "mate-terminal" | "lxterminal" | "tilix" => {
+                command.args([
+                    "-e",
+                    &format!("{} --rcfile {} -i", bash_str, rc_path_str),
+                ]);
+            }
+            _ => {
+                command.args(["-e", &bash_str, "--rcfile", &rc_path_str, "-i"]);
+            }
+        }
+
+        if command.spawn().is_ok() {
+            return Ok(());
+        }
+    }
+
+    Err("No supported terminal emulator found".to_string())
+}
+
 fn spawn_monitor_loop(app: tauri::AppHandle, state: AppState) {
     tauri::async_runtime::spawn(async move {
         loop {
@@ -1002,7 +1126,8 @@ fn main() {
             get_tool_paths,
             download_and_install_scrcpy,
             start_scrcpy,
-            stop_scrcpy
+            stop_scrcpy,
+            open_device_terminal
         ])
         .setup(|app| {
             let state = app.state::<AppState>();
