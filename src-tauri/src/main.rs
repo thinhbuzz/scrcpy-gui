@@ -107,26 +107,30 @@ fn create_command(binary: &str) -> Command {
     };
     let full_binary = format!("{}{}", binary, binary_ext);
 
+    create_command_for_path(&full_binary)
+}
+
+fn create_command_with_override(binary: &str, override_path: Option<&str>) -> Command {
+    if let Some(path) = override_path {
+        if !path.trim().is_empty() {
+            return create_command_for_path(path);
+        }
+    }
+    create_command(binary)
+}
+
+fn create_command_for_path(path: &str) -> Command {
     #[cfg(target_os = "windows")]
     {
-        let mut command = Command::new(full_binary);
+        let mut command = Command::new(path);
         command.creation_flags(0x08000000); // CREATE_NO_WINDOW
         return command;
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        return Command::new(full_binary);
+        return Command::new(path);
     }
-}
-
-fn create_command_with_override(binary: &str, override_path: Option<&str>) -> Command {
-    if let Some(path) = override_path {
-        if !path.trim().is_empty() {
-            return Command::new(path);
-        }
-    }
-    create_command(binary)
 }
 
 fn resolve_or_read_adb_path(state: &AppState, app: &tauri::AppHandle) -> Option<String> {
