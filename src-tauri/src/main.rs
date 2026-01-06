@@ -123,19 +123,6 @@ fn create_command_with_override(binary: &str, override_path: Option<&str>) -> Co
     create_command(binary)
 }
 
-fn read_adb_path(state: &AppState, app: &tauri::AppHandle) -> Option<String> {
-    match state.adb_path.lock() {
-        Ok(path) => path.clone(),
-        Err(err) => {
-            emit_app_log(
-                app,
-                format!("[Backend] Failed to lock adb path: {}\n", err),
-            );
-            None
-        }
-    }
-}
-
 fn resolve_or_read_adb_path(state: &AppState, app: &tauri::AppHandle) -> Option<String> {
     match state.adb_path.lock() {
         Ok(mut path) => {
@@ -151,19 +138,6 @@ fn resolve_or_read_adb_path(state: &AppState, app: &tauri::AppHandle) -> Option<
             emit_app_log(
                 app,
                 format!("[Backend] Failed to lock adb path: {}\n", err),
-            );
-            None
-        }
-    }
-}
-
-fn read_scrcpy_path(state: &AppState, app: &tauri::AppHandle) -> Option<String> {
-    match state.scrcpy_path.lock() {
-        Ok(path) => path.clone(),
-        Err(err) => {
-            emit_app_log(
-                app,
-                format!("[Backend] Failed to lock scrcpy path: {}\n", err),
             );
             None
         }
