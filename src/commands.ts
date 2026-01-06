@@ -1,12 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export const getDevices = async (): Promise<string[]> => {
-  try {
-    return await invoke<string[]>("get_connected_devices");
-  } catch (error) {
-    console.error("Failed to get connected devices:", error);
-    return [];
-  }
+  return await invoke<string[]>("get_connected_devices");
 };
 
 export const startScrcpy = async (

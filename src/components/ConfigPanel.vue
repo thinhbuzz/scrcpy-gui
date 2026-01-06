@@ -39,14 +39,19 @@ const writeLog = (line: string): void => {
 };
 
 const refreshDevices = async (): Promise<void> => {
-  const devices = await getDevices();
-  availableDevices.value = devices;
+  try {
+    const devices = await getDevices();
+    availableDevices.value = devices;
+  } catch (error) {
+    writeLog(`Failed to get connected devices: ${error}\n`);
+  }
 };
 
 let deviceConnectedUnlisten: (() => void) | null = null;
 let deviceDisconnectedUnlisten: (() => void) | null = null;
 let scrcpyLogUnlisten: (() => void) | null = null;
 let scrcpyExitUnlisten: (() => void) | null = null;
+let appLogUnlisten: (() => void) | null = null;
 
 interface LogPayload {
   deviceId: string;
@@ -79,10 +84,12 @@ onMounted(async () => {
         if (selectedIndex !== -1) {
           selectedDevices.value.splice(selectedIndex, 1);
         }
-        
-        // Ensure process tracking is cleaned up
+
+        // Attempt to stop scrcpy if it is still running.
         if (startedDevices.value.includes(deviceId)) {
-          startedDevices.value = startedDevices.value.filter(id => id !== deviceId);
+          stopScrcpy(deviceId).catch((error) => {
+            writeLog(`Failed to stop scrcpy for ${deviceId}: ${error}\n`);
+          });
         }
       });
       
@@ -112,6 +119,10 @@ onMounted(async () => {
       startedDevices.value = startedDevices.value.filter(id => id !== deviceId);
     }
   );
+
+  appLogUnlisten = await listen<string>("app-log", (event) => {
+    writeLog(event.payload);
+  });
 });
 
 onUnmounted(() => {
@@ -119,6 +130,7 @@ onUnmounted(() => {
   if (deviceDisconnectedUnlisten) deviceDisconnectedUnlisten();
   if (scrcpyLogUnlisten) scrcpyLogUnlisten();
   if (scrcpyExitUnlisten) scrcpyExitUnlisten();
+  if (appLogUnlisten) appLogUnlisten();
 });
 
 const availableOptions: CheckboxOptionType[] = [
