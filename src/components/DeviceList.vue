@@ -105,6 +105,7 @@ const toggleDeviceSelection = (deviceId: string, checked: boolean): void => {
 <style lang="scss" scoped>
 .device-container {
   width: 100%;
+  max-width: 100%;
   .device-header {
     display: flex;
     justify-content: space-between;

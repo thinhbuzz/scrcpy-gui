@@ -256,19 +256,6 @@ const stopProcesses = async (): Promise<void> => {
 
 <template>
   <div class="config-pannel">
-    <div class="log-column flex-item">
-      <div class="common-box log-panel">
-        <h3>Logs</h3>
-        <Tabs v-model:activeKey="activeLogTab" class="log-tabs">
-          <TabPane key="system" tab="System">
-            <LogViewer :log-lines="systemLogLines" title="" />
-          </TabPane>
-          <TabPane v-for="deviceId in logDeviceIds" :key="deviceId" :tab="deviceId">
-            <LogViewer :log-lines="deviceLogLines[deviceId] ?? []" title="" />
-          </TabPane>
-        </Tabs>
-      </div>
-    </div>
     <div class="config-column">
       <div class="config-container common-box flex-item">
         <h3>Configurations</h3>
@@ -311,17 +298,29 @@ const stopProcesses = async (): Promise<void> => {
         @open-terminal="openTerminal"
       />
     </div>
+    <div class="log-column flex-item">
+      <div class="common-box log-panel">
+        <h3>Logs</h3>
+        <Tabs v-model:activeKey="activeLogTab" class="log-tabs">
+          <TabPane key="system" tab="System">
+            <LogViewer :log-lines="systemLogLines" title="" />
+          </TabPane>
+          <TabPane v-for="deviceId in logDeviceIds" :key="deviceId" :tab="deviceId">
+            <LogViewer :log-lines="deviceLogLines[deviceId] ?? []" title="" />
+          </TabPane>
+        </Tabs>
+      </div>
+    </div>
   </div>
 </template>
 <style lang="scss" scoped>
 .config-pannel {
   padding: 10px;
   display: flex;
-  flex-direction: row;
-  flex-wrap: wrap-reverse;
-  justify-content: space-between;
+  flex-direction: column;
+  justify-content: flex-start;
   gap: 10px;
-  align-items: start;
+  align-items: stretch;
 }
 .common-box {
   border: 1px solid #d9d9d9;
@@ -333,11 +332,11 @@ const stopProcesses = async (): Promise<void> => {
 }
 
 .config-column {
-  max-width: 600px;
+  width: 100%;
 }
 
 .log-column {
-  min-width: 320px;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 10px;
