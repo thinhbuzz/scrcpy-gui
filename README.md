@@ -1,16 +1,44 @@
-# Tauri + Vue 3 + TypeScript
+# Scrcpy GUI (Tauri)
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+Desktop GUI for `scrcpy` built with Tauri + Vue 3. Manage multiple Android devices, launch scrcpy sessions with common flags, and monitor logs from the app.
+
+## Features
+
+- Device discovery via `adb devices` with auto refresh.
+- Start scrcpy per device with quick options (turn screen off, show touches, always on top, stay awake).
+- FPS control and multi-device start/stop.
+- Live log viewer for scrcpy output and exit status.
+
+## Requirements
+
+- `adb` and `scrcpy` available in your `PATH`.
+- Bun (used by Tauri config) and a Rust toolchain for Tauri builds.
+
+## Development
+
+Install dependencies:
+
+```bash
+bun install
+```
+
+Run the Tauri app:
+
+```bash
+bun run tauri dev
+```
+
+## Build
+
+```bash
+bun run tauri build
+```
+
+## Usage Notes
+
+- Connect devices via USB or TCP/IP and ensure they appear in `adb devices`.
+- Start will launch scrcpy for each selected device; Stop All terminates all running sessions.
 
 ## Recommended IDE Setup
 
 - [VS Code](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
-
-## Type Support For `.vue` Imports in TS
-
-Since TypeScript cannot handle type information for `.vue` imports, they are shimmed to be a generic Vue component type by default. In most cases this is fine if you don't really care about component prop types outside of templates. However, if you wish to get actual prop types in `.vue` imports (for example to get props validation when using manual `h(...)` calls), you can enable Volar's Take Over mode by following these steps:
-
-1. Run `Extensions: Show Built-in Extensions` from VS Code's command palette, look for `TypeScript and JavaScript Language Features`, then right click and select `Disable (Workspace)`. By default, Take Over mode will enable itself if the default TypeScript extension is disabled.
-2. Reload the VS Code window by running `Developer: Reload Window` from the command palette.
-
-You can learn more about Take Over mode [here](https://github.com/johnsoncodehk/volar/discussions/471).
