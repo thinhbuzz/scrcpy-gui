@@ -1,6 +1,6 @@
 {
   "productName": "Scrcpy GUI",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "identifier": "me.thinhbuzz.scrcpygui",
   "build": {
     "beforeDevCommand": "bun run dev",
