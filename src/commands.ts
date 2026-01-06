@@ -18,3 +18,29 @@ export const stopScrcpy = async (deviceId: string): Promise<void> => {
 export const openDeviceTerminal = async (deviceId: string): Promise<void> => {
   await invoke("open_device_terminal", { deviceId });
 };
+
+export const setAdbPath = async (
+  path: string | null
+): Promise<void> => {
+  await invoke("set_adb_path", { path });
+};
+
+export const setScrcpyPath = async (
+  path: string | null
+): Promise<void> => {
+  await invoke("set_scrcpy_path", { path });
+};
+
+export const getToolPaths = async (): Promise<{
+  adbPath: string | null;
+  scrcpyPath: string | null;
+}> => {
+  return await invoke("get_tool_paths");
+};
+
+export const downloadAndInstallScrcpy = async (): Promise<{
+  adbPath: string | null;
+  scrcpyPath: string | null;
+}> => {
+  return await invoke("download_and_install_scrcpy");
+};

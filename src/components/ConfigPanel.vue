@@ -6,12 +6,18 @@ import {
   CheckboxOptionType,
   InputNumber,
   Tabs,
+  Input,
 } from "ant-design-vue";
 import { useStorage } from "@vueuse/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import {
+  downloadAndInstallScrcpy,
   getDevices,
+  getToolPaths,
   openDeviceTerminal,
+  setAdbPath,
+  setScrcpyPath,
   startScrcpy,
   stopScrcpy,
 } from "../commands";
@@ -32,8 +38,16 @@ const selectedOptions = useStorage<string[]>(
     mergeDefaults: true,
   }
 );
+const adbPath = useStorage<string>("adbPath", "", undefined, {
+  mergeDefaults: true,
+});
+const scrcpyPath = useStorage<string>("scrcpyPath", "", undefined, {
+  mergeDefaults: true,
+});
+const toolPathsLoaded = ref(false);
 const availableDevices = ref<string[]>([]);
 const startedDevices = ref<string[]>([]);
+const isDownloadingScrcpy = ref(false);
 
 const maxLogLines = 1000;
 
@@ -51,6 +65,10 @@ const trimLogLines = (lines: string[]): void => {
 const appendSystemLog = (line: string): void => {
   systemLogLines.value.push(line);
   trimLogLines(systemLogLines.value);
+};
+
+const writeLog = (line: string): void => {
+  appendSystemLog(line);
 };
 
 const appendDeviceLog = (deviceId: string, line: string): void => {
@@ -83,6 +101,20 @@ interface LogPayload {
 
 onMounted(async () => {
   refreshDevices();
+  const toolPaths = await getToolPaths().catch((error) => {
+    writeLog(`Failed to load tool paths: ${error}\n`);
+    return null;
+  });
+  toolPathsLoaded.value = true;
+  if (toolPaths) {
+    if (!adbPath.value.trim() && toolPaths.adbPath) {
+      adbPath.value = toolPaths.adbPath;
+    }
+    if (!scrcpyPath.value.trim() && toolPaths.scrcpyPath) {
+      scrcpyPath.value = toolPaths.scrcpyPath;
+    }
+  }
+  await syncToolPaths();
 
   // Listen for device connection events
   deviceConnectedUnlisten = await listen<string[]>(
@@ -151,6 +183,95 @@ onMounted(async () => {
     appendSystemLog(event.payload);
   });
 });
+
+watch(
+  () => adbPath.value,
+  async (value) => {
+    if (!toolPathsLoaded.value) {
+      return;
+    }
+    try {
+      const trimmed = value.trim();
+      await setAdbPath(trimmed.length > 0 ? trimmed : null);
+    } catch (error) {
+      writeLog(`Failed to set adb path: ${error}\n`);
+    }
+  }
+);
+
+watch(
+  () => scrcpyPath.value,
+  async (value) => {
+    if (!toolPathsLoaded.value) {
+      return;
+    }
+    try {
+      const trimmed = value.trim();
+      await setScrcpyPath(trimmed.length > 0 ? trimmed : null);
+    } catch (error) {
+      writeLog(`Failed to set scrcpy path: ${error}\n`);
+    }
+  }
+);
+
+const pickPath = async (label: string): Promise<string | null> => {
+  const selected = await open({
+    multiple: false,
+    directory: false,
+    title: `Select ${label} binary`,
+  });
+  if (typeof selected === "string") {
+    return selected;
+  }
+  return null;
+};
+
+const pickAdbPath = async (): Promise<void> => {
+  const selected = await pickPath("adb");
+  if (selected) {
+    adbPath.value = selected;
+  }
+};
+
+const pickScrcpyPath = async (): Promise<void> => {
+  const selected = await pickPath("scrcpy");
+  if (selected) {
+    scrcpyPath.value = selected;
+  }
+};
+
+const syncToolPaths = async (): Promise<void> => {
+  try {
+    const adbValue = adbPath.value.trim();
+    const scrcpyValue = scrcpyPath.value.trim();
+    await setAdbPath(adbValue.length > 0 ? adbValue : null);
+    await setScrcpyPath(scrcpyValue.length > 0 ? scrcpyValue : null);
+  } catch (error) {
+    writeLog(`Failed to sync tool paths: ${error}\n`);
+  }
+};
+
+const downloadScrcpy = async (): Promise<void> => {
+  if (isDownloadingScrcpy.value) {
+    return;
+  }
+  isDownloadingScrcpy.value = true;
+  try {
+    writeLog("[Frontend] Downloading and installing scrcpy...\n");
+    const paths = await downloadAndInstallScrcpy();
+    if (paths.adbPath) {
+      adbPath.value = paths.adbPath;
+    }
+    if (paths.scrcpyPath) {
+      scrcpyPath.value = paths.scrcpyPath;
+    }
+    writeLog("[Frontend] scrcpy installed and configured.\n");
+  } catch (error) {
+    writeLog(`[Frontend] Failed to download scrcpy: ${error}\n`);
+  } finally {
+    isDownloadingScrcpy.value = false;
+  }
+};
 
 onUnmounted(() => {
   if (deviceConnectedUnlisten) deviceConnectedUnlisten();
@@ -259,6 +380,37 @@ const stopProcesses = async (): Promise<void> => {
     <div class="config-column">
       <div class="config-container common-box">
         <h3>Configurations</h3>
+        <div class="adb-path">
+          <label for="adb-path-input">ADB Path (optional)</label>
+          <div class="path-row">
+            <Input
+              id="adb-path-input"
+              v-model:value="adbPath"
+              size="small"
+              allow-clear
+            />
+            <Button size="small" @click="pickAdbPath">Browse</Button>
+          </div>
+        </div>
+        <div class="adb-path">
+          <label for="scrcpy-path-input">scrcpy Path (optional)</label>
+          <div class="path-row">
+            <Input
+              id="scrcpy-path-input"
+              v-model:value="scrcpyPath"
+              size="small"
+              allow-clear
+            />
+            <Button size="small" @click="pickScrcpyPath">Browse</Button>
+            <Button
+              size="small"
+              @click="downloadScrcpy"
+              :loading="isDownloadingScrcpy"
+            >
+              Download & Install
+            </Button>
+          </div>
+        </div>
         <CheckboxGroup
           v-model:value="selectedOptions"
           name="selectedOptions"
@@ -362,6 +514,19 @@ const stopProcesses = async (): Promise<void> => {
   width: 100%;
   display: flex;
   flex-direction: column;
+  .adb-path {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .path-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    :deep(.ant-input) {
+      flex: 1;
+    }
+  }
   .config-tools {
     display: flex;
     justify-content: space-between;

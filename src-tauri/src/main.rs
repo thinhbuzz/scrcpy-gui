@@ -4,7 +4,8 @@
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -16,6 +17,8 @@ struct AppState {
     current_devices: Arc<Mutex<HashSet<String>>>,
     // Track running scrcpy processes by device ID
     scrcpy_processes: Arc<Mutex<HashMap<String, Arc<Mutex<ProcessState>>>>>,
+    adb_path: Arc<Mutex<Option<String>>>,
+    scrcpy_path: Arc<Mutex<Option<String>>>,
 }
 
 enum ProcessState {
@@ -28,13 +31,81 @@ fn emit_app_log(app: &tauri::AppHandle, message: impl Into<String>) {
     let _ = app.emit("app-log", message.into());
 }
 
+fn tool_paths_file(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("Failed to resolve app data dir: {}", err))?;
+    Ok(dir.join("tool-paths.json"))
+}
+
+fn persist_tool_paths(app: &tauri::AppHandle, state: &AppState) -> Result<(), String> {
+    let path = tool_paths_file(app)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| format!("Failed to create data dir: {}", err))?;
+    }
+    let adb_path = match state.adb_path.lock() {
+        Ok(path) => path.clone(),
+        Err(err) => {
+            emit_app_log(
+                app,
+                format!("[Backend] Failed to lock adb path: {}\n", err),
+            );
+            None
+        }
+    };
+    let scrcpy_path = match state.scrcpy_path.lock() {
+        Ok(path) => path.clone(),
+        Err(err) => {
+            emit_app_log(
+                app,
+                format!("[Backend] Failed to lock scrcpy path: {}\n", err),
+            );
+            None
+        }
+    };
+    let payload = ToolPaths {
+        adb_path,
+        scrcpy_path,
+    };
+    let json = serde_json::to_string_pretty(&payload)
+        .map_err(|err| format!("Failed to serialize tool paths: {}", err))?;
+    std::fs::write(&path, json).map_err(|err| format!("Failed to write tool paths: {}", err))?;
+    Ok(())
+}
+
+fn resolve_binary_from_env(binary: &str) -> Option<String> {
+    let env_key = format!("{}_PATH", binary.to_uppercase());
+    if let Ok(value) = env::var(&env_key) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    let path_var = env::var_os("PATH")?;
+    let binary_ext = if cfg!(target_os = "windows") {
+        format!("{}.exe", binary)
+    } else {
+        binary.to_string()
+    };
+    for dir in env::split_paths(&path_var) {
+        let candidate = dir.join(&binary_ext);
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().to_string());
+        }
+    }
+    None
+}
+
 fn create_command(binary: &str) -> Command {
     let binary_ext = if cfg!(target_os = "windows") {
         ".exe"
     } else {
         ""
     };
-    let mut command = Command::new(format!("{}{}", binary, binary_ext));
+    let command = Command::new(format!("{}{}", binary, binary_ext));
 
     #[cfg(target_os = "windows")]
     {
@@ -43,12 +114,90 @@ fn create_command(binary: &str) -> Command {
     command
 }
 
+fn create_command_with_override(binary: &str, override_path: Option<&str>) -> Command {
+    if let Some(path) = override_path {
+        if !path.trim().is_empty() {
+            return Command::new(path);
+        }
+    }
+    create_command(binary)
+}
+
+fn read_adb_path(state: &AppState, app: &tauri::AppHandle) -> Option<String> {
+    match state.adb_path.lock() {
+        Ok(path) => path.clone(),
+        Err(err) => {
+            emit_app_log(
+                app,
+                format!("[Backend] Failed to lock adb path: {}\n", err),
+            );
+            None
+        }
+    }
+}
+
+fn resolve_or_read_adb_path(state: &AppState, app: &tauri::AppHandle) -> Option<String> {
+    match state.adb_path.lock() {
+        Ok(mut path) => {
+            if path.is_none() {
+                let resolved = resolve_binary_from_env("adb");
+                if resolved.is_some() {
+                    *path = resolved.clone();
+                }
+            }
+            path.clone()
+        }
+        Err(err) => {
+            emit_app_log(
+                app,
+                format!("[Backend] Failed to lock adb path: {}\n", err),
+            );
+            None
+        }
+    }
+}
+
+fn read_scrcpy_path(state: &AppState, app: &tauri::AppHandle) -> Option<String> {
+    match state.scrcpy_path.lock() {
+        Ok(path) => path.clone(),
+        Err(err) => {
+            emit_app_log(
+                app,
+                format!("[Backend] Failed to lock scrcpy path: {}\n", err),
+            );
+            None
+        }
+    }
+}
+
+fn resolve_or_read_scrcpy_path(state: &AppState, app: &tauri::AppHandle) -> Option<String> {
+    match state.scrcpy_path.lock() {
+        Ok(mut path) => {
+            if path.is_none() {
+                let resolved = resolve_binary_from_env("scrcpy");
+                if resolved.is_some() {
+                    *path = resolved.clone();
+                }
+            }
+            path.clone()
+        }
+        Err(err) => {
+            emit_app_log(
+                app,
+                format!("[Backend] Failed to lock scrcpy path: {}\n", err),
+            );
+            None
+        }
+    }
+}
+
 #[tauri::command]
 async fn get_connected_devices(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    let devices = match get_adb_devices().await {
+    let adb_path = resolve_or_read_adb_path(state.inner(), &app);
+    let devices = match get_adb_devices(adb_path).await {
         Ok(devices) => devices,
         Err(err) => {
             emit_app_log(
@@ -117,6 +266,286 @@ async fn stop_device_monitoring(
     Ok(())
 }
 
+#[tauri::command]
+fn set_adb_path(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    path: Option<String>,
+) -> Result<(), String> {
+    let normalized = path
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    match state.adb_path.lock() {
+        Ok(mut stored) => {
+            *stored = normalized;
+        }
+        Err(err) => {
+            emit_app_log(
+                &app,
+                format!("[Backend] Failed to lock adb path: {}\n", err),
+            );
+            return Err(err.to_string());
+        }
+    }
+    persist_tool_paths(&app, state.inner())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn set_scrcpy_path(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    path: Option<String>,
+) -> Result<(), String> {
+    let normalized = path
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    match state.scrcpy_path.lock() {
+        Ok(mut stored) => {
+            *stored = normalized;
+        }
+        Err(err) => {
+            emit_app_log(
+                &app,
+                format!("[Backend] Failed to lock scrcpy path: {}\n", err),
+            );
+            return Err(err.to_string());
+        }
+    }
+    persist_tool_paths(&app, state.inner())?;
+    Ok(())
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ToolPaths {
+    adb_path: Option<String>,
+    scrcpy_path: Option<String>,
+}
+
+#[tauri::command]
+fn get_tool_paths(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<ToolPaths, String> {
+    let adb_path = resolve_or_read_adb_path(state.inner(), &app);
+    let scrcpy_path = resolve_or_read_scrcpy_path(state.inner(), &app);
+    Ok(ToolPaths {
+        adb_path,
+        scrcpy_path,
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct GithubAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+#[derive(serde::Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    assets: Vec<GithubAsset>,
+}
+
+fn pick_scrcpy_asset<'a>(
+    os: &str,
+    arch: &str,
+    assets: &'a [GithubAsset],
+) -> Option<&'a GithubAsset> {
+    let (prefix, ext) = match (os, arch) {
+        ("macos", "aarch64") => ("scrcpy-macos-aarch64-v", ".tar.gz"),
+        ("macos", "x86_64") => ("scrcpy-macos-x86_64-v", ".tar.gz"),
+        ("linux", "x86_64") => ("scrcpy-linux-x86_64-v", ".tar.gz"),
+        ("windows", "x86_64") => ("scrcpy-win64-v", ".zip"),
+        ("windows", "x86") | ("windows", "i686") => ("scrcpy-win32-v", ".zip"),
+        _ => return None,
+    };
+    assets.iter().find(|asset| {
+        asset.name.starts_with(prefix) && asset.name.ends_with(ext)
+    })
+}
+
+fn find_file_recursive(root: &Path, file_name: &str) -> Option<std::path::PathBuf> {
+    if !root.is_dir() {
+        return None;
+    }
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(_) => return None,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find_file_recursive(&path, file_name) {
+                return Some(found);
+            }
+        } else if let Some(name) = path.file_name() {
+            if name == file_name {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(unix)]
+fn ensure_executable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Ok(metadata) = std::fs::metadata(path) {
+        let mut perms = metadata.permissions();
+        perms.set_mode(0o755);
+        let _ = std::fs::set_permissions(path, perms);
+    }
+}
+
+fn extract_archive(archive_path: &Path, dest_dir: &Path) -> Result<(), String> {
+    if archive_path.extension().and_then(|ext| ext.to_str()) == Some("zip") {
+        let file = std::fs::File::open(archive_path)
+            .map_err(|err| format!("Failed to open archive: {}", err))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|err| format!("Failed to read zip: {}", err))?;
+        for i in 0..archive.len() {
+            let mut file = archive
+                .by_index(i)
+                .map_err(|err| format!("Failed to read zip entry: {}", err))?;
+            let out_path = dest_dir.join(file.name());
+            if file.is_dir() {
+                std::fs::create_dir_all(&out_path)
+                    .map_err(|err| format!("Failed to create dir: {}", err))?;
+            } else {
+                if let Some(parent) = out_path.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|err| format!("Failed to create dir: {}", err))?;
+                }
+                let mut out_file = std::fs::File::create(&out_path)
+                    .map_err(|err| format!("Failed to write file: {}", err))?;
+                std::io::copy(&mut file, &mut out_file)
+                    .map_err(|err| format!("Failed to extract file: {}", err))?;
+            }
+        }
+        return Ok(());
+    }
+
+    if archive_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.ends_with(".tar.gz"))
+        .unwrap_or(false)
+    {
+        let file = std::fs::File::open(archive_path)
+            .map_err(|err| format!("Failed to open archive: {}", err))?;
+        let decoder = flate2::read::GzDecoder::new(file);
+        let mut archive = tar::Archive::new(decoder);
+        archive
+            .unpack(dest_dir)
+            .map_err(|err| format!("Failed to extract tar.gz: {}", err))?;
+        return Ok(());
+    }
+
+    Err("Unsupported archive format".to_string())
+}
+
+#[tauri::command]
+async fn download_and_install_scrcpy(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ToolPaths, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("scrcpy-gui")
+        .build()
+        .map_err(|err| format!("Failed to create HTTP client: {}", err))?;
+    let release = client
+        .get("https://api.github.com/repos/Genymobile/scrcpy/releases/latest")
+        .send()
+        .await
+        .map_err(|err| format!("Failed to fetch scrcpy release: {}", err))?
+        .error_for_status()
+        .map_err(|err| format!("Failed to fetch scrcpy release: {}", err))?
+        .json::<GithubRelease>()
+        .await
+        .map_err(|err| format!("Failed to parse scrcpy release: {}", err))?;
+
+    let os = std::env::consts::OS;
+    let arch = std::env::consts::ARCH;
+    let asset = pick_scrcpy_asset(os, arch, &release.assets).ok_or_else(|| {
+        format!("No compatible scrcpy asset for {}/{}", os, arch)
+    })?;
+
+    let app_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("Failed to resolve app data dir: {}", err))?;
+    let install_root = app_dir.join("scrcpy");
+    let version_dir = install_root.join(release.tag_name.trim_start_matches('v'));
+    std::fs::create_dir_all(&version_dir)
+        .map_err(|err| format!("Failed to create install dir: {}", err))?;
+
+    let archive_path = version_dir.join(&asset.name);
+    let download = client
+        .get(&asset.browser_download_url)
+        .send()
+        .await
+        .map_err(|err| format!("Failed to download scrcpy: {}", err))?
+        .error_for_status()
+        .map_err(|err| format!("Failed to download scrcpy: {}", err))?;
+    let bytes = download
+        .bytes()
+        .await
+        .map_err(|err| format!("Failed to read download: {}", err))?;
+    tokio::fs::write(&archive_path, &bytes)
+        .await
+        .map_err(|err| format!("Failed to write archive: {}", err))?;
+
+    let extract_dir = version_dir.join("extracted");
+    if extract_dir.exists() {
+        let _ = std::fs::remove_dir_all(&extract_dir);
+    }
+    std::fs::create_dir_all(&extract_dir)
+        .map_err(|err| format!("Failed to create extract dir: {}", err))?;
+
+    let archive_path_clone = archive_path.clone();
+    let extract_dir_clone = extract_dir.clone();
+    tokio::task::spawn_blocking(move || extract_archive(&archive_path_clone, &extract_dir_clone))
+        .await
+        .map_err(|err| format!("Failed to extract scrcpy: {}", err))?
+        .map_err(|err| err)?;
+
+    let scrcpy_name = if cfg!(target_os = "windows") {
+        "scrcpy.exe"
+    } else {
+        "scrcpy"
+    };
+    let adb_name = if cfg!(target_os = "windows") {
+        "adb.exe"
+    } else {
+        "adb"
+    };
+    let scrcpy_path = find_file_recursive(&extract_dir, scrcpy_name)
+        .ok_or_else(|| "Failed to locate scrcpy binary".to_string())?;
+    let adb_path = find_file_recursive(&extract_dir, adb_name)
+        .ok_or_else(|| "Failed to locate adb binary".to_string())?;
+
+    #[cfg(unix)]
+    {
+        ensure_executable(&scrcpy_path);
+        ensure_executable(&adb_path);
+    }
+
+    let scrcpy_path_str = scrcpy_path.to_string_lossy().to_string();
+    let adb_path_str = adb_path.to_string_lossy().to_string();
+
+    if let Ok(mut stored) = state.scrcpy_path.lock() {
+        *stored = Some(scrcpy_path_str.clone());
+    }
+    if let Ok(mut stored) = state.adb_path.lock() {
+        *stored = Some(adb_path_str.clone());
+    }
+    persist_tool_paths(&app, state.inner())?;
+
+    Ok(ToolPaths {
+        adb_path: Some(adb_path_str),
+        scrcpy_path: Some(scrcpy_path_str),
+    })
+}
+
 #[derive(serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct LogPayload {
@@ -157,7 +586,14 @@ async fn start_scrcpy(
         placeholder
     };
 
-    let mut command = create_command("scrcpy");
+    let scrcpy_path = resolve_or_read_scrcpy_path(state.inner(), &app);
+    let adb_path = resolve_or_read_adb_path(state.inner(), &app);
+    let mut command = create_command_with_override("scrcpy", scrcpy_path.as_deref());
+    if let Some(adb) = adb_path.as_deref() {
+        if !adb.trim().is_empty() {
+            command.env("ADB", adb);
+        }
+    }
     command.args(&args);
     command.stdout(std::process::Stdio::piped());
     command.stderr(std::process::Stdio::piped());
@@ -621,7 +1057,8 @@ fn spawn_monitor_loop(app: tauri::AppHandle, state: AppState) {
                 }
             }
 
-            let devices = match get_adb_devices().await {
+            let adb_path = resolve_or_read_adb_path(&state, &app);
+            let devices = match get_adb_devices(adb_path).await {
                 Ok(list) => list,
                 Err(err) => {
                     emit_app_log(
@@ -664,13 +1101,24 @@ fn spawn_monitor_loop(app: tauri::AppHandle, state: AppState) {
     });
 }
 
-async fn get_adb_devices() -> Result<Vec<String>, String> {
-    let mut command = create_command("adb");
+async fn get_adb_devices(adb_path: Option<String>) -> Result<Vec<String>, String> {
+    let mut command = create_command_with_override("adb", adb_path.as_deref());
     let output = command
         .arg("devices")
         .output()
         .await
-        .map_err(|e| format!("Failed to execute adb: {}", e))?;
+        .map_err(|e| {
+            if e.kind() == ErrorKind::NotFound {
+                let path = env::var("PATH").unwrap_or_else(|_| "<unset>".to_string());
+                let configured = adb_path.as_deref().unwrap_or("<unset>");
+                format!(
+                    "Failed to execute adb: {}. App PATH: {}. Configured adb path: {}",
+                    e, path, configured
+                )
+            } else {
+                format!("Failed to execute adb: {}", e)
+            }
+        })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let devices = stdout
@@ -691,6 +1139,7 @@ async fn get_adb_devices() -> Result<Vec<String>, String> {
 
 fn main() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_os::init())
         .manage(AppState::default())
@@ -698,6 +1147,10 @@ fn main() {
             start_device_monitoring,
             stop_device_monitoring,
             get_connected_devices,
+            set_adb_path,
+            set_scrcpy_path,
+            get_tool_paths,
+            download_and_install_scrcpy,
             start_scrcpy,
             stop_scrcpy,
             open_device_terminal
@@ -706,6 +1159,48 @@ fn main() {
             let state = app.state::<AppState>();
             if let Ok(mut monitoring) = state.monitoring.lock() {
                 *monitoring = true;
+            }
+            if let Ok(path) = tool_paths_file(app.handle()) {
+                match std::fs::read_to_string(&path) {
+                    Ok(data) => match serde_json::from_str::<ToolPaths>(&data) {
+                        Ok(tool_paths) => {
+                            if let Ok(mut adb_path) = state.adb_path.lock() {
+                                if adb_path.is_none() && tool_paths.adb_path.is_some() {
+                                    *adb_path = tool_paths.adb_path;
+                                }
+                            }
+                            if let Ok(mut scrcpy_path) = state.scrcpy_path.lock() {
+                                if scrcpy_path.is_none() && tool_paths.scrcpy_path.is_some() {
+                                    *scrcpy_path = tool_paths.scrcpy_path;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            emit_app_log(
+                                app.handle(),
+                                format!("[Backend] Failed to parse tool paths: {}\n", err),
+                            );
+                        }
+                    },
+                    Err(err) => {
+                        if err.kind() != ErrorKind::NotFound {
+                            emit_app_log(
+                                app.handle(),
+                                format!("[Backend] Failed to read tool paths: {}\n", err),
+                            );
+                        }
+                    }
+                }
+            }
+            if let Ok(mut adb_path) = state.adb_path.lock() {
+                if adb_path.is_none() {
+                    *adb_path = resolve_binary_from_env("adb");
+                }
+            }
+            if let Ok(mut scrcpy_path) = state.scrcpy_path.lock() {
+                if scrcpy_path.is_none() {
+                    *scrcpy_path = resolve_binary_from_env("scrcpy");
+                }
             }
             spawn_monitor_loop(app.handle().clone(), state.inner().clone());
             Ok(())
