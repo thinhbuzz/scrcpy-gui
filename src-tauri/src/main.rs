@@ -119,6 +119,22 @@ fn create_command_with_override(binary: &str, override_path: Option<&str>) -> Co
     create_command(binary)
 }
 
+fn create_scrcpy_command(override_path: Option<&str>) -> Command {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(script_path) = find_executable("script") {
+            let scrcpy_exec = override_path
+                .filter(|path| !path.trim().is_empty())
+                .map(|path| path.to_string())
+                .unwrap_or_else(|| "scrcpy".to_string());
+            let mut command = Command::new(script_path);
+            command.args(["-q", "/dev/null", &scrcpy_exec]);
+            return command;
+        }
+    }
+    create_command_with_override("scrcpy", override_path)
+}
+
 fn create_command_for_path(path: &str) -> Command {
     #[cfg(target_os = "windows")]
     {
@@ -572,7 +588,7 @@ async fn start_scrcpy(
 
     let scrcpy_path = resolve_or_read_scrcpy_path(state.inner(), &app);
     let adb_path = resolve_or_read_adb_path(state.inner(), &app);
-    let mut command = create_command_with_override("scrcpy", scrcpy_path.as_deref());
+    let mut command = create_scrcpy_command(scrcpy_path.as_deref());
     if let Some(adb) = adb_path.as_deref() {
         if !adb.trim().is_empty() {
             command.env("ADB", adb);
