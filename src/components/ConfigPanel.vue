@@ -15,6 +15,7 @@ import {
 import { listen } from "@tauri-apps/api/event";
 import {
   getDevices,
+  focusScrcpyWindow,
   openDeviceTerminal,
   startScrcpy,
   stopScrcpy,
@@ -366,6 +367,19 @@ const openLog = (deviceId: string): void => {
   activeLogTab.value = deviceId;
 };
 
+const focusDevice = async (deviceId: string): Promise<void> => {
+  if (!startedDevices.value.includes(deviceId)) {
+    appendSystemLog(`Device ${deviceId} is not running scrcpy.\n`);
+    return;
+  }
+  try {
+    await focusScrcpyWindow();
+    appendSystemLog(`Focused scrcpy window for ${deviceId}\n`);
+  } catch (error) {
+    appendSystemLog(`Failed to focus scrcpy window: ${error}\n`);
+  }
+};
+
 const openSettings = (): void => {
   settingsOpen.value = true;
 };
@@ -466,6 +480,7 @@ const stopProcesses = async (): Promise<void> => {
         @refresh="refreshDevices"
         @start="startDevice"
         @stop="stopDevice"
+        @focus="focusDevice"
         @open-log="openLog"
         @open-terminal="openTerminal"
       />

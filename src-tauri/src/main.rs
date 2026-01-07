@@ -893,6 +893,12 @@ async fn stop_scrcpy(
 }
 
 #[tauri::command]
+fn focus_scrcpy_window() -> Result<(), String> {
+    focus_scrcpy_window_best_effort();
+    Ok(())
+}
+
+#[tauri::command]
 async fn open_device_terminal(
     app: tauri::AppHandle,
     device_id: String,
@@ -1177,6 +1183,7 @@ fn main() {
             download_and_install_scrcpy,
             start_scrcpy,
             stop_scrcpy,
+            focus_scrcpy_window,
             open_device_terminal
         ])
         .setup(|app| {
