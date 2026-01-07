@@ -76,6 +76,12 @@ const trimLogLines = (lines: string[]): void => {
   }
 };
 
+const clearAllLogs = (): void => {
+  systemLogLines.value = [];
+  deviceLogLines.value = {};
+  activeLogTab.value = "system";
+};
+
 const appendSystemLog = (line: string): void => {
   systemLogLines.value.push(line);
   trimLogLines(systemLogLines.value);
@@ -487,13 +493,19 @@ const stopProcesses = async (): Promise<void> => {
     </div>
     <div class="log-column">
       <div class="common-box log-panel">
-        <h3>Logs</h3>
+        <div class="log-header">
+          <h3>Logs</h3>
+          <Button size="small" @click="clearAllLogs">Clear All</Button>
+        </div>
         <Tabs v-model:activeKey="activeLogTab" class="log-tabs">
           <TabPane key="system" tab="System">
             <LogViewer :log-lines="systemLogLines" title="" />
           </TabPane>
           <TabPane v-for="deviceId in logDeviceIds" :key="deviceId" :tab="deviceId">
-            <LogViewer :log-lines="deviceLogLines[deviceId] ?? []" title="" />
+            <LogViewer
+              :log-lines="deviceLogLines[deviceId] ?? []"
+              title=""
+            />
           </TabPane>
         </Tabs>
       </div>
@@ -531,6 +543,12 @@ const stopProcesses = async (): Promise<void> => {
   display: flex;
   flex-direction: column;
   min-height: 320px;
+}
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .log-tabs {

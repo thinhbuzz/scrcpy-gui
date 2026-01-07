@@ -66,6 +66,6 @@ defineExpose({ scrollToBottom });
   }
 }
 h3 {
-  margin-bottom: 10px;
+  margin: 0;
 }
 </style>
