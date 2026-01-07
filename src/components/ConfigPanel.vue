@@ -54,6 +54,10 @@ const apkInstallRequestRe = /^INFO: Request to install (.+)$/;
 const apkInstallSuccessRe = /^INFO:\s+(.+)\s+successfully installed$/;
 const apkInstallFailedRe = /^ERROR: Failed to install (.+)$/;
 const adbInstallFailedRe = /^adb: failed to install (.+?)(?:: (.+))?$/;
+const pushRequestRe = /^INFO: Request to push (.+)$/;
+const pushSuccessRe = /^INFO:\s+(.+)\s+successfully pushed to (.+)$/;
+const pushFailedRe = /^ERROR: Failed to push (.+)$/;
+const adbPushFailedRe = /^adb: failed to push (.+?)(?:: (.+))?$/;
 
 // Log management
 const systemLogLines = ref<string[]>([]);
@@ -61,6 +65,8 @@ const deviceLogLines = ref<Record<string, string[]>>({});
 const activeLogTab = ref<string>("system");
 const pendingApkInstallByDevice = ref<Record<string, string>>({});
 const pendingApkFailureByDevice = ref<Record<string, string>>({});
+const pendingPushByDevice = ref<Record<string, string>>({});
+const pendingPushFailureByDevice = ref<Record<string, string>>({});
 const notifiedInstallKeys = new Set<string>();
 
 const trimLogLines = (lines: string[]): void => {
@@ -120,6 +126,28 @@ const notifyApkInstall = (
   );
 };
 
+const notifyFilePush = (
+  deviceId: string,
+  path: string,
+  success: boolean,
+  detail?: string
+): void => {
+  const key = `${deviceId}:${path}:${success ? "push-success" : "push-error"}`;
+  if (notifiedInstallKeys.has(key)) {
+    return;
+  }
+  notifiedInstallKeys.add(key);
+
+  const fileName = path.split(/[\\/]/).pop() ?? path;
+  const description = detail
+    ? `${fileName} on ${deviceId}. ${detail}`
+    : `${fileName} on ${deviceId}.`;
+  void sendOsNotification(
+    success ? "File pushed" : "File push failed",
+    description
+  );
+};
+
 const handleApkInstallLog = (deviceId: string, line: string): void => {
   line = line.trim();
   const requestMatch = line.match(apkInstallRequestRe);
@@ -155,6 +183,43 @@ const handleApkInstallLog = (deviceId: string, line: string): void => {
     pendingApkInstallByDevice.value[deviceId] = path;
     if (adbFailedMatch[2]) {
       pendingApkFailureByDevice.value[deviceId] = adbFailedMatch[2];
+    }
+  }
+
+  const pushRequestMatch = line.match(pushRequestRe);
+  if (pushRequestMatch) {
+    pendingPushByDevice.value[deviceId] = pushRequestMatch[1];
+    delete pendingPushFailureByDevice.value[deviceId];
+    return;
+  }
+
+  const pushSuccessMatch = line.match(pushSuccessRe);
+  if (pushSuccessMatch) {
+    const path = pushSuccessMatch[1];
+    const destination = pushSuccessMatch[2];
+    notifyFilePush(deviceId, path, true, `to ${destination}`);
+    delete pendingPushByDevice.value[deviceId];
+    delete pendingPushFailureByDevice.value[deviceId];
+    return;
+  }
+
+  const pushFailedMatch = line.match(pushFailedRe);
+  if (pushFailedMatch) {
+    const path = pushFailedMatch[1];
+    const detail = pendingPushFailureByDevice.value[deviceId];
+    notifyFilePush(deviceId, path, false, detail);
+    delete pendingPushByDevice.value[deviceId];
+    delete pendingPushFailureByDevice.value[deviceId];
+    return;
+  }
+
+  const adbPushFailedMatch = line.match(adbPushFailedRe);
+  if (adbPushFailedMatch) {
+    const pendingPath = pendingPushByDevice.value[deviceId];
+    const path = pendingPath ?? adbPushFailedMatch[1];
+    pendingPushByDevice.value[deviceId] = path;
+    if (adbPushFailedMatch[2]) {
+      pendingPushFailureByDevice.value[deviceId] = adbPushFailedMatch[2];
     }
   }
 };
