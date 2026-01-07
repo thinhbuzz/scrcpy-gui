@@ -24,7 +24,7 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 flate2 = "1.1"
 tar = "0.4"
-zip = "2.4"
+zip = "7.0"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
