@@ -1,28 +1,29 @@
 <script lang="ts" setup>
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   CheckboxGroup,
   Button,
   CheckboxOptionType,
   InputNumber,
   Tabs,
-  Input,
 } from "ant-design-vue";
 import { useStorage } from "@vueuse/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import {
+  isPermissionGranted,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import { listen } from "@tauri-apps/api/event";
 import {
-  downloadAndInstallScrcpy,
   getDevices,
-  getToolPaths,
   openDeviceTerminal,
-  setAdbPath,
-  setScrcpyPath,
   startScrcpy,
   stopScrcpy,
 } from "../commands";
 import LogViewer from "./LogViewer.vue";
 import DeviceList from "./DeviceList.vue";
+const SettingsDialog = defineAsyncComponent(
+  () => import("./SettingsDialog.vue")
+);
 
 const selectedDevices = useStorage<string[]>("selectedDevices", [], undefined, {
   mergeDefaults: true,
@@ -38,23 +39,29 @@ const selectedOptions = useStorage<string[]>(
     mergeDefaults: true,
   }
 );
-const adbPath = useStorage<string>("adbPath", "", undefined, {
-  mergeDefaults: true,
-});
-const scrcpyPath = useStorage<string>("scrcpyPath", "", undefined, {
-  mergeDefaults: true,
-});
-const toolPathsLoaded = ref(false);
+const osNotificationsEnabled = useStorage<boolean>(
+  "osNotificationsEnabled",
+  false,
+  undefined,
+  { mergeDefaults: true }
+);
 const availableDevices = ref<string[]>([]);
 const startedDevices = ref<string[]>([]);
-const isDownloadingScrcpy = ref(false);
+const settingsOpen = ref(false);
 
 const maxLogLines = 1000;
+const apkInstallRequestRe = /^INFO: Request to install (.+)$/;
+const apkInstallSuccessRe = /^INFO:\s+(.+)\s+successfully installed$/;
+const apkInstallFailedRe = /^ERROR: Failed to install (.+)$/;
+const adbInstallFailedRe = /^adb: failed to install (.+?)(?:: (.+))?$/;
 
 // Log management
 const systemLogLines = ref<string[]>([]);
 const deviceLogLines = ref<Record<string, string[]>>({});
 const activeLogTab = ref<string>("system");
+const pendingApkInstallByDevice = ref<Record<string, string>>({});
+const pendingApkFailureByDevice = ref<Record<string, string>>({});
+const notifiedInstallKeys = new Set<string>();
 
 const trimLogLines = (lines: string[]): void => {
   if (lines.length > maxLogLines) {
@@ -67,16 +74,89 @@ const appendSystemLog = (line: string): void => {
   trimLogLines(systemLogLines.value);
 };
 
-const writeLog = (line: string): void => {
-  appendSystemLog(line);
-};
-
 const appendDeviceLog = (deviceId: string, line: string): void => {
   if (!deviceLogLines.value[deviceId]) {
     deviceLogLines.value[deviceId] = [];
   }
   deviceLogLines.value[deviceId].push(line);
   trimLogLines(deviceLogLines.value[deviceId]);
+};
+
+const sendOsNotification = async (title: string, body: string): Promise<void> => {
+  if (!osNotificationsEnabled.value) {
+    return;
+  }
+  try {
+    let granted = await isPermissionGranted();
+    if (!granted) {
+      appendSystemLog("[Frontend] Notification permission not granted.\n");
+      return;
+    }
+    await sendNotification({ title, body });
+  } catch (error) {
+    appendSystemLog(`[Frontend] Failed to send notification: ${error}\n`);
+  }
+};
+
+const notifyApkInstall = (
+  deviceId: string,
+  path: string,
+  success: boolean,
+  detail?: string
+): void => {
+  const key = `${deviceId}:${path}:${success ? "success" : "error"}`;
+  if (notifiedInstallKeys.has(key)) {
+    return;
+  }
+  notifiedInstallKeys.add(key);
+
+  const fileName = path.split(/[\\/]/).pop() ?? path;
+  const description = detail
+    ? `${fileName} on ${deviceId}. ${detail}`
+    : `${fileName} on ${deviceId}.`;
+  void sendOsNotification(
+    success ? "APK installed" : "APK install failed",
+    description
+  );
+};
+
+const handleApkInstallLog = (deviceId: string, line: string): void => {
+  line = line.trim();
+  const requestMatch = line.match(apkInstallRequestRe);
+  if (requestMatch) {
+    pendingApkInstallByDevice.value[deviceId] = requestMatch[1];
+    delete pendingApkFailureByDevice.value[deviceId];
+    return;
+  }
+
+  const successMatch = line.match(apkInstallSuccessRe);
+  if (successMatch) {
+    const path = successMatch[1];
+    notifyApkInstall(deviceId, path, true);
+    delete pendingApkInstallByDevice.value[deviceId];
+    delete pendingApkFailureByDevice.value[deviceId];
+    return;
+  }
+
+  const failedMatch = line.match(apkInstallFailedRe);
+  if (failedMatch) {
+    const path = failedMatch[1];
+    const detail = pendingApkFailureByDevice.value[deviceId];
+    notifyApkInstall(deviceId, path, false, detail);
+    delete pendingApkInstallByDevice.value[deviceId];
+    delete pendingApkFailureByDevice.value[deviceId];
+    return;
+  }
+
+  const adbFailedMatch = line.match(adbInstallFailedRe);
+  if (adbFailedMatch) {
+    const pendingPath = pendingApkInstallByDevice.value[deviceId];
+    const path = pendingPath ?? adbFailedMatch[1];
+    pendingApkInstallByDevice.value[deviceId] = path;
+    if (adbFailedMatch[2]) {
+      pendingApkFailureByDevice.value[deviceId] = adbFailedMatch[2];
+    }
+  }
 };
 
 const refreshDevices = async (): Promise<void> => {
@@ -101,20 +181,6 @@ interface LogPayload {
 
 onMounted(async () => {
   refreshDevices();
-  const toolPaths = await getToolPaths().catch((error) => {
-    writeLog(`Failed to load tool paths: ${error}\n`);
-    return null;
-  });
-  toolPathsLoaded.value = true;
-  if (toolPaths) {
-    if (!adbPath.value.trim() && toolPaths.adbPath) {
-      adbPath.value = toolPaths.adbPath;
-    }
-    if (!scrcpyPath.value.trim() && toolPaths.scrcpyPath) {
-      scrcpyPath.value = toolPaths.scrcpyPath;
-    }
-  }
-  await syncToolPaths();
 
   // Listen for device connection events
   deviceConnectedUnlisten = await listen<string[]>(
@@ -160,6 +226,7 @@ onMounted(async () => {
       "scrcpy-log",
       (event) => {
         const { deviceId, message } = event.payload;
+        handleApkInstallLog(deviceId, message);
         appendDeviceLog(deviceId, message);
       }
     );
@@ -183,95 +250,6 @@ onMounted(async () => {
     appendSystemLog(event.payload);
   });
 });
-
-watch(
-  () => adbPath.value,
-  async (value) => {
-    if (!toolPathsLoaded.value) {
-      return;
-    }
-    try {
-      const trimmed = value.trim();
-      await setAdbPath(trimmed.length > 0 ? trimmed : null);
-    } catch (error) {
-      writeLog(`Failed to set adb path: ${error}\n`);
-    }
-  }
-);
-
-watch(
-  () => scrcpyPath.value,
-  async (value) => {
-    if (!toolPathsLoaded.value) {
-      return;
-    }
-    try {
-      const trimmed = value.trim();
-      await setScrcpyPath(trimmed.length > 0 ? trimmed : null);
-    } catch (error) {
-      writeLog(`Failed to set scrcpy path: ${error}\n`);
-    }
-  }
-);
-
-const pickPath = async (label: string): Promise<string | null> => {
-  const selected = await open({
-    multiple: false,
-    directory: false,
-    title: `Select ${label} binary`,
-  });
-  if (typeof selected === "string") {
-    return selected;
-  }
-  return null;
-};
-
-const pickAdbPath = async (): Promise<void> => {
-  const selected = await pickPath("adb");
-  if (selected) {
-    adbPath.value = selected;
-  }
-};
-
-const pickScrcpyPath = async (): Promise<void> => {
-  const selected = await pickPath("scrcpy");
-  if (selected) {
-    scrcpyPath.value = selected;
-  }
-};
-
-const syncToolPaths = async (): Promise<void> => {
-  try {
-    const adbValue = adbPath.value.trim();
-    const scrcpyValue = scrcpyPath.value.trim();
-    await setAdbPath(adbValue.length > 0 ? adbValue : null);
-    await setScrcpyPath(scrcpyValue.length > 0 ? scrcpyValue : null);
-  } catch (error) {
-    writeLog(`Failed to sync tool paths: ${error}\n`);
-  }
-};
-
-const downloadScrcpy = async (): Promise<void> => {
-  if (isDownloadingScrcpy.value) {
-    return;
-  }
-  isDownloadingScrcpy.value = true;
-  try {
-    writeLog("[Frontend] Downloading and installing scrcpy...\n");
-    const paths = await downloadAndInstallScrcpy();
-    if (paths.adbPath) {
-      adbPath.value = paths.adbPath;
-    }
-    if (paths.scrcpyPath) {
-      scrcpyPath.value = paths.scrcpyPath;
-    }
-    writeLog("[Frontend] scrcpy installed and configured.\n");
-  } catch (error) {
-    writeLog(`[Frontend] Failed to download scrcpy: ${error}\n`);
-  } finally {
-    isDownloadingScrcpy.value = false;
-  }
-};
 
 onUnmounted(() => {
   if (deviceConnectedUnlisten) deviceConnectedUnlisten();
@@ -321,6 +299,10 @@ const openTerminal = async (deviceId: string): Promise<void> => {
 
 const openLog = (deviceId: string): void => {
   activeLogTab.value = deviceId;
+};
+
+const openSettings = (): void => {
+  settingsOpen.value = true;
 };
 
 const startDevice = async (deviceId: string): Promise<void> => {
@@ -379,37 +361,9 @@ const stopProcesses = async (): Promise<void> => {
   <div class="config-panel">
     <div class="config-column">
       <div class="config-container common-box">
-        <h3>Configurations</h3>
-        <div class="adb-path">
-          <label for="adb-path-input">ADB Path (optional)</label>
-          <div class="path-row">
-            <Input
-              id="adb-path-input"
-              v-model:value="adbPath"
-              size="small"
-              allow-clear
-            />
-            <Button size="small" @click="pickAdbPath">Browse</Button>
-          </div>
-        </div>
-        <div class="adb-path">
-          <label for="scrcpy-path-input">scrcpy Path (optional)</label>
-          <div class="path-row">
-            <Input
-              id="scrcpy-path-input"
-              v-model:value="scrcpyPath"
-              size="small"
-              allow-clear
-            />
-            <Button size="small" @click="pickScrcpyPath">Browse</Button>
-            <Button
-              size="small"
-              @click="downloadScrcpy"
-              :loading="isDownloadingScrcpy"
-            >
-              Download & Install
-            </Button>
-          </div>
+        <div class="config-header">
+          <h3>Configurations</h3>
+          <Button size="small" @click="openSettings">Settings</Button>
         </div>
         <CheckboxGroup
           v-model:value="selectedOptions"
@@ -439,6 +393,7 @@ const stopProcesses = async (): Promise<void> => {
           >
         </div>
       </div>
+      <SettingsDialog v-model:open="settingsOpen" />
       <DeviceList
         :availableDevices="availableDevices"
         :startedDevices="startedDevices"
@@ -514,6 +469,12 @@ const stopProcesses = async (): Promise<void> => {
   width: 100%;
   display: flex;
   flex-direction: column;
+  .config-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
   .adb-path {
     display: flex;
     flex-direction: column;

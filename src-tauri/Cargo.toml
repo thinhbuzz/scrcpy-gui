@@ -15,6 +15,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = { version = "2", features = [] }
+tauri-plugin-notification = { version = "2", features = [] }
 tauri-plugin-shell = { version = "2", features = [] }
 tauri-plugin-os = { version = "2", features = [] }
 serde = { version = "1.0", features = ["derive"] }

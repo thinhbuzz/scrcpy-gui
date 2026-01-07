@@ -9,4 +9,3 @@ import ConfigPanel from "./components/ConfigPanel.vue";
     <ConfigPanel />
   </div>
 </template>
-

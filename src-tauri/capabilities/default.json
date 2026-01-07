@@ -10,6 +10,7 @@
         "core:window:default",
         "os:default",
         "shell:default",
+        "notification:default",
         "dialog:allow-open",
         "dialog:allow-save"
     ],
