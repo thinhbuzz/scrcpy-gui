@@ -16,6 +16,7 @@ import { listen } from "@tauri-apps/api/event";
 import {
   getDevices,
   openDeviceTerminal,
+  startDeviceMonitoring,
   startScrcpy,
   stopScrcpy,
 } from "../commands";
@@ -254,9 +255,7 @@ interface LogPayload {
   message: string;
 }
 
-onMounted(async () => {
-  refreshDevices();
-
+const setupListeners = async (): Promise<void> => {
   // Listen for device connection events
   deviceConnectedUnlisten = await listen<string[]>(
     "device-connected",
@@ -273,7 +272,7 @@ onMounted(async () => {
     (event) => {
       const removedDevices = event.payload;
       appendSystemLog(`Device(s) disconnected: ${removedDevices.join(", ")}\n`);
-      
+
       removedDevices.forEach((deviceId) => {
         // Remove from selected if disconnected
         const selectedIndex = selectedDevices.value.indexOf(deviceId);
@@ -288,9 +287,17 @@ onMounted(async () => {
           });
           startedDevices.value = startedDevices.value.filter((id) => id !== deviceId);
         }
-
       });
-      
+
+      if (
+        uninstallOpen.value
+        && selectedUninstallDevice.value
+        && removedDevices.includes(selectedUninstallDevice.value)
+      ) {
+        uninstallOpen.value = false;
+        selectedUninstallDevice.value = "";
+      }
+
       refreshDevices();
     }
   );
@@ -324,6 +331,23 @@ onMounted(async () => {
   appLogUnlisten = await listen<string>("app-log", (event) => {
     appendSystemLog(event.payload);
   });
+};
+
+const startMonitoringAfterPaint = (): void => {
+  window.requestAnimationFrame(() => {
+    setTimeout(() => {
+      startDeviceMonitoring()
+        .then(refreshDevices)
+        .catch((error) => {
+          appendSystemLog(`Failed to start device monitoring: ${error}\n`);
+        });
+    }, 0);
+  });
+};
+
+onMounted(() => {
+  void setupListeners();
+  startMonitoringAfterPaint();
 });
 
 onUnmounted(() => {
@@ -478,8 +502,9 @@ const stopProcesses = async (): Promise<void> => {
           >
         </div>
       </div>
-      <SettingsDialog v-model:open="settingsOpen" />
+      <SettingsDialog v-if="settingsOpen" v-model:open="settingsOpen" />
       <UninstallDialog
+        v-if="uninstallOpen"
         v-model:open="uninstallOpen"
         :deviceId="selectedUninstallDevice"
       />

@@ -4,6 +4,10 @@ export const getDevices = async (): Promise<string[]> => {
   return await invoke<string[]>("get_connected_devices");
 };
 
+export const startDeviceMonitoring = async (): Promise<void> => {
+  await invoke("start_device_monitoring");
+};
+
 export const startScrcpy = async (
   deviceId: string,
   args: string[]

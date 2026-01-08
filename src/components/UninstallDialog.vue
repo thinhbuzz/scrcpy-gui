@@ -184,7 +184,8 @@ watch(
     if (value) {
       refreshDevices().then(() => refreshApps());
     }
-  }
+  },
+  { immediate: true }
 );
 
 watch(

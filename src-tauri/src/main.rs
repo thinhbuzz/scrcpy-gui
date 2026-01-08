@@ -1519,9 +1519,6 @@ fn main() {
         ])
         .setup(|app| {
             let state = app.state::<AppState>();
-            if let Ok(mut monitoring) = state.monitoring.lock() {
-                *monitoring = true;
-            }
             if let Ok(path) = tool_paths_file(app.handle()) {
                 match std::fs::read_to_string(&path) {
                     Ok(data) => match serde_json::from_str::<ToolPaths>(&data) {
@@ -1564,7 +1561,6 @@ fn main() {
                     *scrcpy_path = resolve_binary_from_env("scrcpy");
                 }
             }
-            spawn_monitor_loop(app.handle().clone(), state.inner().clone());
             Ok(())
         })
         .build(tauri::generate_context!())

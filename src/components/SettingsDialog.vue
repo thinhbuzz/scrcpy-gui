@@ -205,7 +205,8 @@ watch(
     if (value) {
       refreshPermission();
     }
-  }
+  },
+  { immediate: true }
 );
 
 onMounted(async () => {
