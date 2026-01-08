@@ -19,10 +19,6 @@ export const openDeviceTerminal = async (deviceId: string): Promise<void> => {
   await invoke("open_device_terminal", { deviceId });
 };
 
-export const focusScrcpyWindow = async (): Promise<void> => {
-  await invoke("focus_scrcpy_window");
-};
-
 export const setAdbPath = async (
   path: string | null
 ): Promise<void> => {

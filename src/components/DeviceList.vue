@@ -13,7 +13,6 @@ const emit = defineEmits<{
   (e: "refresh"): void;
   (e: "start", deviceId: string): void;
   (e: "stop", deviceId: string): void;
-  (e: "focus", deviceId: string): void;
   (e: "open-log", deviceId: string): void;
   (e: "open-terminal", deviceId: string): void;
 }>();
@@ -95,12 +94,10 @@ const toggleDeviceSelection = (deviceId: string, checked: boolean): void => {
           </Button>
           <Button
             size="small"
-            :disabled="!startedDevices.includes(deviceId)"
-            @click="emit('focus', deviceId)"
+            @click="emit('open-log', deviceId)"
           >
-            Focus
+            Logs
           </Button>
-          <Button size="small" @click="emit('open-log', deviceId)">Logs</Button>
           <Button size="small" @click="emit('open-terminal', deviceId)">
             Terminal
           </Button>

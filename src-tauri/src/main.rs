@@ -620,8 +620,6 @@ async fn start_scrcpy(
         }
     };
 
-    focus_scrcpy_window_best_effort();
-
     let stdout = match child.stdout.take() {
         Some(stdout) => stdout,
         None => {
@@ -893,12 +891,6 @@ async fn stop_scrcpy(
 }
 
 #[tauri::command]
-fn focus_scrcpy_window() -> Result<(), String> {
-    focus_scrcpy_window_best_effort();
-    Ok(())
-}
-
-#[tauri::command]
 async fn open_device_terminal(
     app: tauri::AppHandle,
     device_id: String,
@@ -949,26 +941,6 @@ fn escape_shell_single(input: &str) -> String {
     input.replace('\'', "'\\''")
 }
 
-#[cfg(target_os = "macos")]
-fn focus_macos_process(process_name: &str) {
-    let script = format!(
-        "tell application \"System Events\" to set frontmost of process \"{}\" to true",
-        escape_applescript(process_name)
-    );
-    let _ = Command::new("osascript").args(["-e", &script]).spawn();
-}
-
-fn focus_scrcpy_window_best_effort() {
-    #[cfg(target_os = "macos")]
-    {
-        tauri::async_runtime::spawn(async {
-            for _ in 0..5 {
-                tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-                focus_macos_process("scrcpy");
-            }
-        });
-    }
-}
 
 fn open_macos_terminal(device_id: &str) -> Result<(), String> {
     let escaped = escape_shell_single(device_id);
@@ -1183,7 +1155,6 @@ fn main() {
             download_and_install_scrcpy,
             start_scrcpy,
             stop_scrcpy,
-            focus_scrcpy_window,
             open_device_terminal
         ])
         .setup(|app| {
