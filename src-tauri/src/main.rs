@@ -11,6 +11,11 @@ use tauri::{Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
+const SERVER_FILE_NAME: &str = "scrcpy-gui-server-v1.0.1";
+const SERVER_DEVICE_PATH: &str = "/data/local/tmp/scrcpy-gui-server";
+const SERVER_CLASS_NAME: &str = "me.thinhbuzz.scrcpy.gui.server.Server";
+const SERVER_BYTES: &[u8] = include_bytes!("../scrcpy-gui-server-v1.0.1");
+
 #[derive(Default, Clone)]
 struct AppState {
     monitoring: Arc<Mutex<bool>>,
@@ -147,6 +152,10 @@ fn create_command_for_path(path: &str) -> Command {
     {
         return Command::new(path);
     }
+}
+
+fn args_from(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| value.to_string()).collect()
 }
 
 fn resolve_or_read_adb_path(state: &AppState, app: &tauri::AppHandle) -> Option<String> {
@@ -1138,6 +1147,353 @@ async fn get_adb_devices(adb_path: Option<String>) -> Result<Vec<String>, String
     Ok(devices)
 }
 
+async fn run_adb_shell(
+    adb_path: Option<String>,
+    device_id: &str,
+    args: &[String],
+) -> Result<String, String> {
+    let shell_args = build_shell_args(device_id, args);
+    let output = run_adb(adb_path, &shell_args).await?;
+    if output.status.success() {
+        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let message = if !stderr.trim().is_empty() {
+        stderr.to_string()
+    } else {
+        stdout.to_string()
+    };
+    Err(message.trim().to_string())
+}
+
+fn build_shell_args(device_id: &str, args: &[String]) -> Vec<String> {
+    let mut shell_args = Vec::with_capacity(args.len() + 3);
+    shell_args.push("-s".to_string());
+    shell_args.push(device_id.to_string());
+    shell_args.push("shell".to_string());
+    shell_args.extend_from_slice(args);
+    shell_args
+}
+
+async fn run_adb(
+    adb_path: Option<String>,
+    args: &[String],
+) -> Result<std::process::Output, String> {
+    let mut command = create_command_with_override("adb", adb_path.as_deref());
+    for arg in args {
+        command.arg(arg);
+    }
+    command.output().await.map_err(|e| {
+        if e.kind() == ErrorKind::NotFound {
+            let path = env::var("PATH").unwrap_or_else(|_| "<unset>".to_string());
+            let configured = adb_path.as_deref().unwrap_or("<unset>");
+            format!(
+                "Failed to execute adb: {}. App PATH: {}. Configured adb path: {}",
+                e, path, configured
+            )
+        } else {
+            format!("Failed to execute adb: {}", e)
+        }
+    })
+}
+
+async fn run_adb_shell_capture(
+    adb_path: Option<String>,
+    device_id: &str,
+    args: &[String],
+) -> Result<String, String> {
+    let shell_args = build_shell_args(device_id, args);
+    let output = run_adb(adb_path, &shell_args).await?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if output.status.success() {
+        if stdout.trim().is_empty() {
+            return Ok(stderr);
+        }
+        if stderr.trim().is_empty() {
+            return Ok(stdout);
+        }
+        return Ok(format!("{}\n{}", stdout.trim_end(), stderr.trim_end()));
+    }
+    let message = if !stderr.trim().is_empty() {
+        stderr
+    } else {
+        stdout
+    };
+    Err(message.trim().to_string())
+}
+
+async fn adb_push(
+    adb_path: Option<String>,
+    device_id: &str,
+    local_path: &Path,
+    remote_path: &str,
+) -> Result<(), String> {
+    let mut args = Vec::new();
+    args.push("-s".to_string());
+    args.push(device_id.to_string());
+    args.push("push".to_string());
+    args.push(local_path.to_string_lossy().to_string());
+    args.push(remote_path.to_string());
+    let output = run_adb(adb_path, &args).await?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let message = if !stderr.trim().is_empty() {
+        stderr.to_string()
+    } else {
+        stdout.to_string()
+    };
+    Err(message.trim().to_string())
+}
+
+fn ensure_local_server_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("Failed to resolve app data dir: {}", err))?;
+    let path = dir.join(SERVER_FILE_NAME);
+    if let Ok(metadata) = fs::metadata(&path) {
+        if metadata.len() == SERVER_BYTES.len() as u64 {
+            return Ok(path);
+        }
+    }
+    fs::create_dir_all(&dir).map_err(|err| format!("Failed to create data dir: {}", err))?;
+    fs::write(&path, SERVER_BYTES)
+        .map_err(|err| format!("Failed to write server file: {}", err))?;
+    Ok(path)
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeviceApp {
+    name: String,
+    package_name: String,
+    is_system_app: bool,
+    base64_icon: String,
+    is_installed_for_user: bool,
+    is_disabled: bool,
+}
+
+fn parse_list_command_output(output: &str) -> Result<Vec<DeviceApp>, String> {
+    if output.contains("ListCommand failed") {
+        return Err(output.trim().to_string());
+    }
+    let marker = "ListCommand successfully:";
+    let json = output
+        .split_once(marker)
+        .map(|(_, rest)| rest.trim())
+        .ok_or_else(|| "ListCommand output not found".to_string())?;
+    serde_json::from_str::<Vec<DeviceApp>>(json)
+        .map_err(|err| format!("Failed to parse ListCommand output: {}", err))
+}
+
+async fn run_server_list(
+    adb_path: Option<String>,
+    device_id: &str,
+) -> Result<Vec<DeviceApp>, String> {
+    let mut args = Vec::new();
+    args.push(format!("CLASSPATH={}", SERVER_DEVICE_PATH));
+    args.extend(args_from(&[
+        "app_process",
+        "/",
+        SERVER_CLASS_NAME,
+        "--list",
+        "app",
+        "--list-type",
+        "all",
+    ]));
+    let output = run_adb_shell_capture(adb_path, device_id, &args).await?;
+    parse_list_command_output(&output)
+}
+
+async fn ensure_server_on_device(
+    app: &tauri::AppHandle,
+    adb_path: Option<String>,
+    device_id: &str,
+) -> Result<(), String> {
+    let local_path = ensure_local_server_file(app)?;
+    let local_size = SERVER_BYTES.len() as u64;
+
+    let mut needs_push = true;
+    if let Ok(output) = run_adb_shell_capture(
+        adb_path.clone(),
+        device_id,
+        &args_from(&["stat", "-c", "%s", SERVER_DEVICE_PATH]),
+    )
+    .await
+    {
+        if let Ok(remote_size) = output.trim().parse::<u64>() {
+            if remote_size == local_size {
+                needs_push = false;
+            }
+        }
+    }
+
+    if needs_push {
+        adb_push(adb_path, device_id, &local_path, SERVER_DEVICE_PATH).await?;
+    }
+
+    Ok(())
+}
+
+async fn remove_server_on_device(
+    adb_path: Option<String>,
+    device_id: &str,
+) -> Result<(), String> {
+    run_adb_shell_capture(
+        adb_path,
+        device_id,
+        &args_from(&["rm", "-f", SERVER_DEVICE_PATH]),
+    )
+    .await
+    .map(|_| ())
+}
+
+#[tauri::command]
+async fn list_device_apps(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    device_id: String,
+) -> Result<Vec<DeviceApp>, String> {
+    let trimmed = device_id.trim();
+    if trimmed.is_empty() {
+        return Err("Device ID is empty".to_string());
+    }
+    let adb_path = resolve_or_read_adb_path(state.inner(), &app);
+    ensure_server_on_device(&app, adb_path.clone(), trimmed).await?;
+    let list = run_server_list(adb_path.clone(), trimmed).await;
+    let _ = remove_server_on_device(adb_path.clone(), trimmed).await;
+    let mut apps = list?;
+    apps.sort_by(|a, b| {
+        let left = if a.name.is_empty() {
+            &a.package_name
+        } else {
+            &a.name
+        };
+        let right = if b.name.is_empty() {
+            &b.package_name
+        } else {
+            &b.name
+        };
+        left.to_lowercase()
+            .cmp(&right.to_lowercase())
+            .then_with(|| a.package_name.cmp(&b.package_name))
+    });
+    Ok(apps)
+}
+
+#[tauri::command]
+async fn uninstall_package(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    device_id: String,
+    package_name: String,
+    is_system: bool,
+) -> Result<(), String> {
+    let trimmed_device = device_id.trim();
+    let trimmed_package = package_name.trim();
+    if trimmed_device.is_empty() {
+        return Err("Device ID is empty".to_string());
+    }
+    if trimmed_package.is_empty() {
+        return Err("Package name is empty".to_string());
+    }
+    let adb_path = resolve_or_read_adb_path(state.inner(), &app);
+    let args = if is_system {
+        vec![
+            "pm".to_string(),
+            "uninstall".to_string(),
+            "--user".to_string(),
+            "0".to_string(),
+            trimmed_package.to_string(),
+        ]
+    } else {
+        vec![
+            "pm".to_string(),
+            "uninstall".to_string(),
+            trimmed_package.to_string(),
+        ]
+    };
+    let output = run_adb_shell(adb_path, trimmed_device, &args).await?;
+    if output.to_lowercase().contains("failure") {
+        return Err(output.trim().to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn set_package_enabled(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    device_id: String,
+    package_name: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let trimmed_device = device_id.trim();
+    let trimmed_package = package_name.trim();
+    if trimmed_device.is_empty() {
+        return Err("Device ID is empty".to_string());
+    }
+    if trimmed_package.is_empty() {
+        return Err("Package name is empty".to_string());
+    }
+    let adb_path = resolve_or_read_adb_path(state.inner(), &app);
+    let args = if enabled {
+        vec![
+            "pm".to_string(),
+            "enable".to_string(),
+            "--user".to_string(),
+            "0".to_string(),
+            trimmed_package.to_string(),
+        ]
+    } else {
+        vec![
+            "pm".to_string(),
+            "disable-user".to_string(),
+            "--user".to_string(),
+            "0".to_string(),
+            trimmed_package.to_string(),
+        ]
+    };
+    let output = run_adb_shell(adb_path, trimmed_device, &args).await?;
+    if output.to_lowercase().contains("failure") {
+        return Err(output.trim().to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn install_existing_package(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    device_id: String,
+    package_name: String,
+) -> Result<(), String> {
+    let trimmed_device = device_id.trim();
+    let trimmed_package = package_name.trim();
+    if trimmed_device.is_empty() {
+        return Err("Device ID is empty".to_string());
+    }
+    if trimmed_package.is_empty() {
+        return Err("Package name is empty".to_string());
+    }
+    let adb_path = resolve_or_read_adb_path(state.inner(), &app);
+    let args = vec![
+        "pm".to_string(),
+        "install-existing".to_string(),
+        trimmed_package.to_string(),
+    ];
+    let output = run_adb_shell(adb_path, trimmed_device, &args).await?;
+    if output.to_lowercase().contains("failure") {
+        return Err(output.trim().to_string());
+    }
+    Ok(())
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -1155,7 +1511,11 @@ fn main() {
             download_and_install_scrcpy,
             start_scrcpy,
             stop_scrcpy,
-            open_device_terminal
+            open_device_terminal,
+            list_device_apps,
+            uninstall_package,
+            install_existing_package,
+            set_package_enabled
         ])
         .setup(|app| {
             let state = app.state::<AppState>();

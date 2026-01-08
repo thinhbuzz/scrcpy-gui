@@ -44,3 +44,39 @@ export const downloadAndInstallScrcpy = async (): Promise<{
 }> => {
   return await invoke("download_and_install_scrcpy");
 };
+
+export interface DeviceApp {
+  packageName: string;
+  name: string;
+  isSystemApp: boolean;
+  base64Icon: string;
+  isInstalledForUser: boolean;
+  isDisabled: boolean;
+}
+
+export const listDeviceApps = async (deviceId: string): Promise<DeviceApp[]> => {
+  return await invoke("list_device_apps", { deviceId });
+};
+
+export const uninstallPackage = async (
+  deviceId: string,
+  packageName: string,
+  isSystem: boolean
+): Promise<void> => {
+  await invoke("uninstall_package", { deviceId, packageName, isSystem });
+};
+
+export const installExistingPackage = async (
+  deviceId: string,
+  packageName: string
+): Promise<void> => {
+  await invoke("install_existing_package", { deviceId, packageName });
+};
+
+export const setPackageEnabled = async (
+  deviceId: string,
+  packageName: string,
+  enabled: boolean
+): Promise<void> => {
+  await invoke("set_package_enabled", { deviceId, packageName, enabled });
+};

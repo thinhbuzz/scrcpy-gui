@@ -15,6 +15,7 @@ const emit = defineEmits<{
   (e: "stop", deviceId: string): void;
   (e: "open-log", deviceId: string): void;
   (e: "open-terminal", deviceId: string): void;
+  (e: "open-uninstall", deviceId: string): void;
 }>();
 
 const selected = computed({
@@ -100,6 +101,9 @@ const toggleDeviceSelection = (deviceId: string, checked: boolean): void => {
           </Button>
           <Button size="small" @click="emit('open-terminal', deviceId)">
             Terminal
+          </Button>
+          <Button size="small" danger @click="emit('open-uninstall', deviceId)">
+            Uninstall
           </Button>
         </div>
       </div>

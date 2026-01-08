@@ -24,6 +24,9 @@ import DeviceList from "./DeviceList.vue";
 const SettingsDialog = defineAsyncComponent(
   () => import("./SettingsDialog.vue")
 );
+const UninstallDialog = defineAsyncComponent(
+  () => import("./UninstallDialog.vue")
+);
 
 const selectedDevices = useStorage<string[]>("selectedDevices", [], undefined, {
   mergeDefaults: true,
@@ -48,6 +51,7 @@ const osNotificationsEnabled = useStorage<boolean>(
 const availableDevices = ref<string[]>([]);
 const startedDevices = ref<string[]>([]);
 const settingsOpen = ref(false);
+const uninstallOpen = ref(false);
 
 const maxLogLines = 1000;
 const apkInstallRequestRe = /^INFO: Request to install (.+)$/;
@@ -376,6 +380,13 @@ const openSettings = (): void => {
   settingsOpen.value = true;
 };
 
+const selectedUninstallDevice = ref<string>("");
+
+const openUninstall = (deviceId?: string): void => {
+  selectedUninstallDevice.value = deviceId ?? "";
+  uninstallOpen.value = true;
+};
+
 const startDevice = async (deviceId: string): Promise<void> => {
   if (!availableDevices.value.includes(deviceId)) {
     appendSystemLog(`Device ${deviceId} is not available.\n`);
@@ -434,7 +445,10 @@ const stopProcesses = async (): Promise<void> => {
       <div class="config-container common-box">
         <div class="config-header">
           <h3>Configurations</h3>
-          <Button size="small" @click="openSettings">Settings</Button>
+          <div class="header-actions">
+            <Button size="small" @click="openSettings">Settings</Button>
+            <Button size="small" danger @click="openUninstall()">Uninstall</Button>
+          </div>
         </div>
         <CheckboxGroup
           v-model:value="selectedOptions"
@@ -465,6 +479,10 @@ const stopProcesses = async (): Promise<void> => {
         </div>
       </div>
       <SettingsDialog v-model:open="settingsOpen" />
+      <UninstallDialog
+        v-model:open="uninstallOpen"
+        :deviceId="selectedUninstallDevice"
+      />
       <DeviceList
         :availableDevices="availableDevices"
         :startedDevices="startedDevices"
@@ -474,6 +492,7 @@ const stopProcesses = async (): Promise<void> => {
         @stop="stopDevice"
         @open-log="openLog"
         @open-terminal="openTerminal"
+        @open-uninstall="openUninstall"
       />
     </div>
     <div class="log-column">
@@ -557,6 +576,11 @@ const stopProcesses = async (): Promise<void> => {
     align-items: center;
     justify-content: space-between;
     gap: 10px;
+  }
+  .header-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
   }
   .adb-path {
     display: flex;
