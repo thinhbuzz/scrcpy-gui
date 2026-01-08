@@ -63,7 +63,27 @@ jobs:
         with:
           tagName: v__VERSION__ # tauri-action replaces __VERSION__ with the app version.
           releaseName: 'Scrcpy GUI v__VERSION__'
-          releaseBody: 'See the assets to download and install this version.'
+          releaseBody: |
+            **Note:**
+
+            > The application is unsigned, so a warning will appear when running it. Please ignore that warning and continue using the application. On macOS, you can use the application https://github.com/alienator88/Sentinel to run unsigned software.
+
+            Windows
+            - [Scrcpy.GUI___VERSION___x64-setup.exe](https://github.com/thinhbuzz/scrcpy-gui/releases/download/v__VERSION__/Scrcpy.GUI___VERSION___x64-setup.exe): Standard Windows 64-bit installer (recommended)
+            - [Scrcpy.GUI___VERSION___x64_en-US.msi](https://github.com/thinhbuzz/scrcpy-gui/releases/download/v__VERSION__/Scrcpy.GUI___VERSION___x64_en-US.msi): MSI package for IT/deployment
+
+            macOS
+            - [Scrcpy.GUI___VERSION___x64.dmg](https://github.com/thinhbuzz/scrcpy-gui/releases/download/v__VERSION__/Scrcpy.GUI___VERSION___x64.dmg): Intel (x64)
+            - [Scrcpy.GUI___VERSION___aarch64.dmg](https://github.com/thinhbuzz/scrcpy-gui/releases/download/v__VERSION__/Scrcpy.GUI___VERSION___aarch64.dmg): Apple Silicon (M1/M2/M3)
+
+            Linux
+            - [Scrcpy.GUI___VERSION___amd64.deb](https://github.com/thinhbuzz/scrcpy-gui/releases/download/v__VERSION__/Scrcpy.GUI___VERSION___amd64.deb): Ubuntu/Debian 64-bit
+            - [Scrcpy.GUI-__VERSION__-1.x86_64.rpm](https://github.com/thinhbuzz/scrcpy-gui/releases/download/v__VERSION__/Scrcpy.GUI-__VERSION__-1.x86_64.rpm): Fedora/RHEL/openSUSE 64-bit
+            - [Scrcpy.GUI___VERSION___amd64.AppImage](https://github.com/thinhbuzz/scrcpy-gui/releases/download/v__VERSION__/Scrcpy.GUI___VERSION___amd64.AppImage): Portable, works on many distros
+
+            Portable (no install)
+            - [Scrcpy.GUI_x64.app.tar.gz](https://github.com/thinhbuzz/scrcpy-gui/releases/download/v__VERSION__/Scrcpy.GUI_x64.app.tar.gz): macOS Intel
+            - [Scrcpy.GUI_aarch64.app.tar.gz](https://github.com/thinhbuzz/scrcpy-gui/releases/download/v__VERSION__/Scrcpy.GUI_aarch64.app.tar.gz): macOS Apple Silicon
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
