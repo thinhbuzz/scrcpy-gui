@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from "vue";
+import { defineAsyncComponent, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   Badge,
   CheckboxGroup,
@@ -11,25 +11,24 @@ import {
 } from "ant-design-vue";
 import { useStorage } from "@vueuse/core";
 import {
-  isPermissionGranted,
-  sendNotification,
-} from "@tauri-apps/plugin-notification";
-import { listen } from "@tauri-apps/api/event";
-import {
   getDevices,
-  getToolPaths,
   openDeviceTerminal,
   startDeviceMonitoring,
   startScrcpy,
   stopScrcpy,
 } from "../commands";
-import LogViewer from "./LogViewer.vue";
 import DeviceList from "./DeviceList.vue";
+import { useScrcpyLogs } from "../composables/useScrcpyLogs";
+import { useToolPaths } from "../composables/useToolPaths";
+import { useScrcpyListeners } from "../composables/useScrcpyListeners";
 const SettingsDialog = defineAsyncComponent(
   () => import("./SettingsDialog.vue")
 );
 const UninstallDialog = defineAsyncComponent(
   () => import("./UninstallDialog.vue")
+);
+const LogViewer = defineAsyncComponent(
+  () => import("./LogViewer.vue")
 );
 
 const selectedDevices = useStorage<string[]>("selectedDevices", [], undefined, {
@@ -56,195 +55,32 @@ const availableDevices = ref<string[]>([]);
 const startedDevices = ref<string[]>([]);
 const settingsOpen = ref(false);
 const uninstallOpen = ref(false);
-const toolPaths = ref<{ adbPath: string | null; scrcpyPath: string | null } | null>(null);
 const toolWarningOpen = ref(false);
+const selectedUninstallDevice = ref<string>("");
 const hasSeenToolWarning = useStorage<boolean>(
   "hasSeenToolWarning",
   false,
   undefined,
   { mergeDefaults: true }
 );
-
-const maxLogLines = 1000;
-const apkInstallRequestRe = /^INFO: Request to install (.+)$/;
-const apkInstallSuccessRe = /^INFO:\s+(.+)\s+successfully installed$/;
-const apkInstallFailedRe = /^ERROR: Failed to install (.+)$/;
-const adbInstallFailedRe = /^adb: failed to install (.+?)(?:: (.+))?$/;
-const pushRequestRe = /^INFO: Request to push (.+)$/;
-const pushSuccessRe = /^INFO:\s+(.+)\s+successfully pushed to (.+)$/;
-const pushFailedRe = /^ERROR: Failed to push (.+)$/;
-const adbPushFailedRe = /^adb: failed to push (.+?)(?:: (.+))?$/;
-
-// Log management
-const systemLogLines = ref<string[]>([]);
-const deviceLogLines = ref<Record<string, string[]>>({});
-const activeLogTab = ref<string>("system");
-const pendingApkInstallByDevice = ref<Record<string, string>>({});
-const pendingApkFailureByDevice = ref<Record<string, string>>({});
-const pendingPushByDevice = ref<Record<string, string>>({});
-const pendingPushFailureByDevice = ref<Record<string, string>>({});
-const notifiedInstallKeys = new Set<string>();
-
-const trimLogLines = (lines: string[]): void => {
-  if (lines.length > maxLogLines) {
-    lines.splice(0, lines.length - maxLogLines);
-  }
-};
-
-const clearAllLogs = (): void => {
-  systemLogLines.value = [];
-  deviceLogLines.value = {};
-  activeLogTab.value = "system";
-};
-
-const appendSystemLog = (line: string): void => {
-  systemLogLines.value.push(line);
-  trimLogLines(systemLogLines.value);
-};
-
-const appendDeviceLog = (deviceId: string, line: string): void => {
-  if (!deviceLogLines.value[deviceId]) {
-    deviceLogLines.value[deviceId] = [];
-  }
-  deviceLogLines.value[deviceId].push(line);
-  trimLogLines(deviceLogLines.value[deviceId]);
-};
-
-const sendOsNotification = async (title: string, body: string): Promise<void> => {
-  if (!osNotificationsEnabled.value) {
-    return;
-  }
-  try {
-    let granted = await isPermissionGranted();
-    if (!granted) {
-      appendSystemLog("[Frontend] Notification permission not granted.\n");
-      return;
-    }
-    await sendNotification({ title, body });
-  } catch (error) {
-    appendSystemLog(`[Frontend] Failed to send notification: ${error}\n`);
-  }
-};
-
-const notifyApkInstall = (
-  deviceId: string,
-  path: string,
-  success: boolean,
-  detail?: string
-): void => {
-  const key = `${deviceId}:${path}:${success ? "success" : "error"}`;
-  if (notifiedInstallKeys.has(key)) {
-    return;
-  }
-  notifiedInstallKeys.add(key);
-
-  const fileName = path.split(/[\\/]/).pop() ?? path;
-  const description = detail
-    ? `${fileName} on ${deviceId}. ${detail}`
-    : `${fileName} on ${deviceId}.`;
-  void sendOsNotification(
-    success ? "APK installed" : "APK install failed",
-    description
-  );
-};
-
-const notifyFilePush = (
-  deviceId: string,
-  path: string,
-  success: boolean,
-  detail?: string
-): void => {
-  const key = `${deviceId}:${path}:${success ? "push-success" : "push-error"}`;
-  if (notifiedInstallKeys.has(key)) {
-    return;
-  }
-  notifiedInstallKeys.add(key);
-
-  const fileName = path.split(/[\\/]/).pop() ?? path;
-  const description = detail
-    ? `${fileName} on ${deviceId}. ${detail}`
-    : `${fileName} on ${deviceId}.`;
-  void sendOsNotification(
-    success ? "File pushed" : "File push failed",
-    description
-  );
-};
-
-const handleApkInstallLog = (deviceId: string, line: string): void => {
-  line = line.trim();
-  const requestMatch = line.match(apkInstallRequestRe);
-  if (requestMatch) {
-    pendingApkInstallByDevice.value[deviceId] = requestMatch[1];
-    delete pendingApkFailureByDevice.value[deviceId];
-    return;
-  }
-
-  const successMatch = line.match(apkInstallSuccessRe);
-  if (successMatch) {
-    const path = successMatch[1];
-    notifyApkInstall(deviceId, path, true);
-    delete pendingApkInstallByDevice.value[deviceId];
-    delete pendingApkFailureByDevice.value[deviceId];
-    return;
-  }
-
-  const failedMatch = line.match(apkInstallFailedRe);
-  if (failedMatch) {
-    const path = failedMatch[1];
-    const detail = pendingApkFailureByDevice.value[deviceId];
-    notifyApkInstall(deviceId, path, false, detail);
-    delete pendingApkInstallByDevice.value[deviceId];
-    delete pendingApkFailureByDevice.value[deviceId];
-    return;
-  }
-
-  const adbFailedMatch = line.match(adbInstallFailedRe);
-  if (adbFailedMatch) {
-    const pendingPath = pendingApkInstallByDevice.value[deviceId];
-    const path = pendingPath ?? adbFailedMatch[1];
-    pendingApkInstallByDevice.value[deviceId] = path;
-    if (adbFailedMatch[2]) {
-      pendingApkFailureByDevice.value[deviceId] = adbFailedMatch[2];
-    }
-  }
-
-  const pushRequestMatch = line.match(pushRequestRe);
-  if (pushRequestMatch) {
-    pendingPushByDevice.value[deviceId] = pushRequestMatch[1];
-    delete pendingPushFailureByDevice.value[deviceId];
-    return;
-  }
-
-  const pushSuccessMatch = line.match(pushSuccessRe);
-  if (pushSuccessMatch) {
-    const path = pushSuccessMatch[1];
-    const destination = pushSuccessMatch[2];
-    notifyFilePush(deviceId, path, true, `to ${destination}`);
-    delete pendingPushByDevice.value[deviceId];
-    delete pendingPushFailureByDevice.value[deviceId];
-    return;
-  }
-
-  const pushFailedMatch = line.match(pushFailedRe);
-  if (pushFailedMatch) {
-    const path = pushFailedMatch[1];
-    const detail = pendingPushFailureByDevice.value[deviceId];
-    notifyFilePush(deviceId, path, false, detail);
-    delete pendingPushByDevice.value[deviceId];
-    delete pendingPushFailureByDevice.value[deviceId];
-    return;
-  }
-
-  const adbPushFailedMatch = line.match(adbPushFailedRe);
-  if (adbPushFailedMatch) {
-    const pendingPath = pendingPushByDevice.value[deviceId];
-    const path = pendingPath ?? adbPushFailedMatch[1];
-    pendingPushByDevice.value[deviceId] = path;
-    if (adbPushFailedMatch[2]) {
-      pendingPushFailureByDevice.value[deviceId] = adbPushFailedMatch[2];
-    }
-  }
-};
+const {
+  systemLogLines,
+  deviceLogLines,
+  activeLogTab,
+  logDeviceIds,
+  clearAllLogs,
+  appendSystemLog,
+  handleScrcpyLog,
+  setActiveLogTab,
+} = useScrcpyLogs(osNotificationsEnabled, availableDevices);
+const {
+  toolPaths,
+  refreshToolPaths,
+  toolsMissing,
+  scrcpyMissing,
+  toolWarningTitle,
+  toolWarningMessage,
+} = useToolPaths(appendSystemLog);
 
 const refreshDevices = async (): Promise<void> => {
   try {
@@ -254,95 +90,16 @@ const refreshDevices = async (): Promise<void> => {
     appendSystemLog(`Failed to get connected devices: ${error}\n`);
   }
 };
-
-let deviceConnectedUnlisten: (() => void) | null = null;
-let deviceDisconnectedUnlisten: (() => void) | null = null;
-let scrcpyLogUnlisten: (() => void) | null = null;
-let scrcpyExitUnlisten: (() => void) | null = null;
-let appLogUnlisten: (() => void) | null = null;
-
-interface LogPayload {
-  deviceId: string;
-  message: string;
-}
-
-const setupListeners = async (): Promise<void> => {
-  // Listen for device connection events
-  deviceConnectedUnlisten = await listen<string[]>(
-    "device-connected",
-    (event) => {
-      const newDevices = event.payload;
-      appendSystemLog(`Device(s) connected: ${newDevices.join(", ")}\n`);
-      refreshDevices();
-    }
-  );
-
-  // Listen for device disconnection events
-  deviceDisconnectedUnlisten = await listen<string[]>(
-    "device-disconnected",
-    (event) => {
-      const removedDevices = event.payload;
-      appendSystemLog(`Device(s) disconnected: ${removedDevices.join(", ")}\n`);
-
-      removedDevices.forEach((deviceId) => {
-        // Remove from selected if disconnected
-        const selectedIndex = selectedDevices.value.indexOf(deviceId);
-        if (selectedIndex !== -1) {
-          selectedDevices.value.splice(selectedIndex, 1);
-        }
-
-        // Attempt to stop scrcpy if it is still running.
-        if (startedDevices.value.includes(deviceId)) {
-          stopScrcpy(deviceId).catch((error) => {
-            appendSystemLog(`Failed to stop scrcpy for ${deviceId}: ${error}\n`);
-          });
-          startedDevices.value = startedDevices.value.filter((id) => id !== deviceId);
-        }
-      });
-
-      if (
-        uninstallOpen.value
-        && selectedUninstallDevice.value
-        && removedDevices.includes(selectedUninstallDevice.value)
-      ) {
-        uninstallOpen.value = false;
-        selectedUninstallDevice.value = "";
-      }
-
-      refreshDevices();
-    }
-  );
-
-  // Listen for scrcpy logs from backend
-  try {
-    scrcpyLogUnlisten = await listen<LogPayload>(
-      "scrcpy-log",
-      (event) => {
-        const { deviceId, message } = event.payload;
-        handleApkInstallLog(deviceId, message);
-        appendDeviceLog(deviceId, message);
-      }
-    );
-  } catch (e) {
-    appendSystemLog(`[Frontend] Error setting up log listener: ${e}\n`);
-  }
-
-  // Listen for scrcpy exit from backend
-  scrcpyExitUnlisten = await listen<[string, number | null]>(
-    "scrcpy-exit",
-    (event) => {
-      const [deviceId, exitCode] = event.payload;
-      appendSystemLog(
-        `Device ${deviceId} scrcpy exited with code ${exitCode ?? "null"}\n`
-      );
-      startedDevices.value = startedDevices.value.filter(id => id !== deviceId);
-    }
-  );
-
-  appLogUnlisten = await listen<string>("app-log", (event) => {
-    appendSystemLog(event.payload);
-  });
-};
+const { setupListeners, cleanup } = useScrcpyListeners({
+  selectedDevices,
+  startedDevices,
+  selectedUninstallDevice,
+  uninstallOpen,
+  appendSystemLog,
+  refreshDevices,
+  stopScrcpy,
+  handleScrcpyLog,
+});
 
 const startMonitoringAfterPaint = (): void => {
   window.requestAnimationFrame(() => {
@@ -368,11 +125,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  if (deviceConnectedUnlisten) deviceConnectedUnlisten();
-  if (deviceDisconnectedUnlisten) deviceDisconnectedUnlisten();
-  if (scrcpyLogUnlisten) scrcpyLogUnlisten();
-  if (scrcpyExitUnlisten) scrcpyExitUnlisten();
-  if (appLogUnlisten) appLogUnlisten();
+  cleanup();
 });
 
 const availableOptions: CheckboxOptionType[] = [
@@ -388,71 +141,6 @@ const availableOptions: CheckboxOptionType[] = [
 
 const { TabPane } = Tabs;
 
-const logDeviceIds = computed(() => {
-  const ids = new Set<string>();
-  availableDevices.value.forEach((id) => ids.add(id));
-  Object.keys(deviceLogLines.value).forEach((id) => ids.add(id));
-  return Array.from(ids);
-});
-
-const toolsMissing = computed(() => {
-  if (!toolPaths.value) {
-    return false;
-  }
-  return !toolPaths.value.adbPath || !toolPaths.value.scrcpyPath;
-});
-
-const adbMissing = computed(() => {
-  if (!toolPaths.value) {
-    return false;
-  }
-  return !toolPaths.value.adbPath;
-});
-
-const scrcpyMissing = computed(() => {
-  if (!toolPaths.value) {
-    return false;
-  }
-  return !toolPaths.value.scrcpyPath;
-});
-
-const toolWarningTitle = computed(() => {
-  if (scrcpyMissing.value && !adbMissing.value) {
-    return "Missing scrcpy";
-  }
-  if (adbMissing.value && !scrcpyMissing.value) {
-    return "Missing adb";
-  }
-  return "Missing scrcpy/adb";
-});
-
-const toolWarningMessage = computed(() => {
-  if (scrcpyMissing.value && !adbMissing.value) {
-    return "scrcpy not found. Open Settings to configure the scrcpy path or download and install scrcpy.";
-  }
-  if (adbMissing.value && !scrcpyMissing.value) {
-    return "adb not found. Open Settings to configure the adb path or download and install adb.";
-  }
-  return "scrcpy/adb not found. Open Settings to configure the paths or download and install scrcpy/adb.";
-});
-
-const refreshToolPaths = async (): Promise<void> => {
-  try {
-    toolPaths.value = await getToolPaths();
-  } catch (error) {
-    appendSystemLog(`Failed to read tool paths: ${error}\n`);
-  }
-};
-
-watch(
-  logDeviceIds,
-  (ids) => {
-    if (activeLogTab.value !== "system" && !ids.includes(activeLogTab.value)) {
-      activeLogTab.value = "system";
-    }
-  },
-  { immediate: true }
-);
 const openTerminal = async (deviceId: string): Promise<void> => {
   try {
     await openDeviceTerminal(deviceId);
@@ -463,7 +151,7 @@ const openTerminal = async (deviceId: string): Promise<void> => {
 };
 
 const openLog = (deviceId: string): void => {
-  activeLogTab.value = deviceId;
+  setActiveLogTab(deviceId);
 };
 
 const openSettings = (): void => {
@@ -474,8 +162,6 @@ const openSettingsFromWarning = (): void => {
   toolWarningOpen.value = false;
   settingsOpen.value = true;
 };
-
-const selectedUninstallDevice = ref<string>("");
 
 const openUninstall = (deviceId?: string): void => {
   selectedUninstallDevice.value = deviceId ?? "";
