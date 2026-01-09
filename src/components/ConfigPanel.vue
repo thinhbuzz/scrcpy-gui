@@ -1,10 +1,12 @@
 <script lang="ts" setup>
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from "vue";
 import {
+  Badge,
   CheckboxGroup,
   Button,
   CheckboxOptionType,
   InputNumber,
+  Modal,
   Tabs,
 } from "ant-design-vue";
 import { useStorage } from "@vueuse/core";
@@ -15,6 +17,7 @@ import {
 import { listen } from "@tauri-apps/api/event";
 import {
   getDevices,
+  getToolPaths,
   openDeviceTerminal,
   startDeviceMonitoring,
   startScrcpy,
@@ -53,6 +56,14 @@ const availableDevices = ref<string[]>([]);
 const startedDevices = ref<string[]>([]);
 const settingsOpen = ref(false);
 const uninstallOpen = ref(false);
+const toolPaths = ref<{ adbPath: string | null; scrcpyPath: string | null } | null>(null);
+const toolWarningOpen = ref(false);
+const hasSeenToolWarning = useStorage<boolean>(
+  "hasSeenToolWarning",
+  false,
+  undefined,
+  { mergeDefaults: true }
+);
 
 const maxLogLines = 1000;
 const apkInstallRequestRe = /^INFO: Request to install (.+)$/;
@@ -348,6 +359,12 @@ const startMonitoringAfterPaint = (): void => {
 onMounted(() => {
   void setupListeners();
   startMonitoringAfterPaint();
+  void refreshToolPaths().then(() => {
+    if (toolsMissing.value && !hasSeenToolWarning.value) {
+      toolWarningOpen.value = true;
+      hasSeenToolWarning.value = true;
+    }
+  });
 });
 
 onUnmounted(() => {
@@ -378,6 +395,55 @@ const logDeviceIds = computed(() => {
   return Array.from(ids);
 });
 
+const toolsMissing = computed(() => {
+  if (!toolPaths.value) {
+    return false;
+  }
+  return !toolPaths.value.adbPath || !toolPaths.value.scrcpyPath;
+});
+
+const adbMissing = computed(() => {
+  if (!toolPaths.value) {
+    return false;
+  }
+  return !toolPaths.value.adbPath;
+});
+
+const scrcpyMissing = computed(() => {
+  if (!toolPaths.value) {
+    return false;
+  }
+  return !toolPaths.value.scrcpyPath;
+});
+
+const toolWarningTitle = computed(() => {
+  if (scrcpyMissing.value && !adbMissing.value) {
+    return "Missing scrcpy";
+  }
+  if (adbMissing.value && !scrcpyMissing.value) {
+    return "Missing adb";
+  }
+  return "Missing scrcpy/adb";
+});
+
+const toolWarningMessage = computed(() => {
+  if (scrcpyMissing.value && !adbMissing.value) {
+    return "scrcpy not found. Open Settings to configure the scrcpy path or download and install scrcpy.";
+  }
+  if (adbMissing.value && !scrcpyMissing.value) {
+    return "adb not found. Open Settings to configure the adb path or download and install adb.";
+  }
+  return "scrcpy/adb not found. Open Settings to configure the paths or download and install scrcpy/adb.";
+});
+
+const refreshToolPaths = async (): Promise<void> => {
+  try {
+    toolPaths.value = await getToolPaths();
+  } catch (error) {
+    appendSystemLog(`Failed to read tool paths: ${error}\n`);
+  }
+};
+
 watch(
   logDeviceIds,
   (ids) => {
@@ -404,6 +470,11 @@ const openSettings = (): void => {
   settingsOpen.value = true;
 };
 
+const openSettingsFromWarning = (): void => {
+  toolWarningOpen.value = false;
+  settingsOpen.value = true;
+};
+
 const selectedUninstallDevice = ref<string>("");
 
 const openUninstall = (deviceId?: string): void => {
@@ -425,6 +496,14 @@ const startDevice = async (deviceId: string): Promise<void> => {
     .concat(["--max-fps", selectedFPS.value.toString()]);
 
   try {
+    await refreshToolPaths();
+    if (scrcpyMissing.value && toolPaths.value?.adbPath) {
+      appendSystemLog(
+        "[Frontend] scrcpy not found. Configure scrcpy path in Settings.\n"
+      );
+      toolWarningOpen.value = true;
+      return;
+    }
     appendSystemLog(`[Frontend] Requesting start for ${deviceId}...\n`);
     await startScrcpy(deviceId, args);
     startedDevices.value.push(deviceId);
@@ -461,6 +540,15 @@ const stopProcesses = async (): Promise<void> => {
     await stopDevice(deviceId);
   }
 };
+
+watch(
+  () => settingsOpen.value,
+  (value, previous) => {
+    if (previous && !value) {
+      void refreshToolPaths();
+    }
+  }
+);
 </script>
 
 <template>
@@ -470,7 +558,11 @@ const stopProcesses = async (): Promise<void> => {
         <div class="config-header">
           <h3>Configurations</h3>
           <div class="header-actions">
-            <Button size="small" @click="openSettings">Settings</Button>
+            <Badge :dot="toolsMissing">
+              <Button size="small" :danger="toolsMissing" @click="openSettings">
+                Settings
+              </Button>
+            </Badge>
             <Button size="small" danger @click="openUninstall()">Uninstall</Button>
           </div>
         </div>
@@ -502,6 +594,17 @@ const stopProcesses = async (): Promise<void> => {
           >
         </div>
       </div>
+      <Modal
+        v-model:open="toolWarningOpen"
+        :title="toolWarningTitle"
+        ok-text="Open Settings"
+        cancel-text="Later"
+        @ok="openSettingsFromWarning"
+      >
+        <div class="tool-warning">
+          {{ toolWarningMessage }}
+        </div>
+      </Modal>
       <SettingsDialog v-if="settingsOpen" v-model:open="settingsOpen" />
       <UninstallDialog
         v-if="uninstallOpen"
@@ -632,6 +735,10 @@ const stopProcesses = async (): Promise<void> => {
   > *:last-child {
     margin-bottom: 0;
   }
+}
+
+.tool-warning {
+  color: #a61d24;
 }
 
 h3 {

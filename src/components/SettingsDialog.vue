@@ -37,6 +37,9 @@ const osNotificationsEnabled = useStorage<boolean>(
   undefined,
   { mergeDefaults: true }
 );
+const toolsMissing = computed(() => {
+  return !adbPath.value.trim() || !scrcpyPath.value.trim();
+});
 
 const toolPathsLoaded = ref(false);
 const isDownloadingScrcpy = ref(false);
@@ -230,6 +233,10 @@ onMounted(async () => {
   <Modal v-model:open="openModel" title="Settings" :footer="null">
     <div class="settings-section">
       <h4>Tool Paths</h4>
+      <div v-if="toolsMissing" class="settings-warning">
+        scrcpy/adb not found. Use Browse to select scrcpy/adb or Download & Install
+        to install scrcpy/adb.
+      </div>
       <div class="path-group">
         <label for="adb-path-input">ADB Path (optional)</label>
         <div class="path-row">
@@ -317,6 +324,11 @@ onMounted(async () => {
   :deep(.ant-input) {
     flex: 1;
   }
+}
+
+.settings-warning {
+  color: #a61d24;
+  font-size: 12px;
 }
 
 .setting-row {
