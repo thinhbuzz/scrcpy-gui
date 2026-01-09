@@ -1,7 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export const getDevices = async (): Promise<string[]> => {
-  return await invoke<string[]>("get_connected_devices");
+export interface DeviceInfo {
+  id: string;
+  label: string;
+}
+
+export const getDevices = async (): Promise<DeviceInfo[]> => {
+  return await invoke<DeviceInfo[]>("get_connected_devices");
 };
 
 export const startDeviceMonitoring = async (): Promise<void> => {

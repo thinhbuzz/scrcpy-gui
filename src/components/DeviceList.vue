@@ -2,8 +2,13 @@
 import { computed } from "vue";
 import { Checkbox, Button } from "ant-design-vue";
 
+type DeviceInfo = {
+  id: string;
+  label: string;
+};
+
 const props = defineProps<{
-  availableDevices: string[];
+  availableDevices: DeviceInfo[];
   selectedDevices: string[];
   startedDevices: string[];
 }>();
@@ -24,7 +29,7 @@ const selected = computed({
 });
 
 const selectAllDevices = (isSelect: boolean): void => {
-  selected.value = isSelect ? [...props.availableDevices] : [];
+  selected.value = isSelect ? props.availableDevices.map((device) => device.id) : [];
 };
 
 const toggleDeviceSelection = (deviceId: string, checked: boolean): void => {
@@ -68,41 +73,45 @@ const toggleDeviceSelection = (deviceId: string, checked: boolean): void => {
       <div v-if="!availableDevices.length" class="device-empty">
         No devices detected.
       </div>
-      <div v-for="deviceId in availableDevices" :key="deviceId" class="device-row">
+      <div
+        v-for="device in availableDevices"
+        :key="device.id"
+        class="device-row"
+      >
         <div class="device-info">
           <Checkbox
-            :checked="selected.includes(deviceId)"
-            @change="(event) => toggleDeviceSelection(deviceId, event.target.checked)"
+            :checked="selected.includes(device.id)"
+            @change="(event) => toggleDeviceSelection(device.id, event.target.checked)"
           />
-          <span class="device-id">{{ deviceId }}</span>
+          <span class="device-id">{{ device.label }}</span>
         </div>
         <div class="device-actions">
           <Button
             type="primary"
             size="small"
-            :disabled="startedDevices.includes(deviceId)"
-            @click="emit('start', deviceId)"
+            :disabled="startedDevices.includes(device.id)"
+            @click="emit('start', device.id)"
           >
             Start
           </Button>
           <Button
             danger
             size="small"
-            :disabled="!startedDevices.includes(deviceId)"
-            @click="emit('stop', deviceId)"
+            :disabled="!startedDevices.includes(device.id)"
+            @click="emit('stop', device.id)"
           >
             Stop
           </Button>
           <Button
             size="small"
-            @click="emit('open-log', deviceId)"
+            @click="emit('open-log', device.id)"
           >
             Logs
           </Button>
-          <Button size="small" @click="emit('open-terminal', deviceId)">
+          <Button size="small" @click="emit('open-terminal', device.id)">
             Terminal
           </Button>
-          <Button size="small" danger @click="emit('open-uninstall', deviceId)">
+          <Button size="small" danger @click="emit('open-uninstall', device.id)">
             Uninstall
           </Button>
         </div>

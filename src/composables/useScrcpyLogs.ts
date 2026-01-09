@@ -22,7 +22,7 @@ const trimLogLines = (lines: string[]): void => {
 
 export const useScrcpyLogs = (
   osNotificationsEnabled: Ref<boolean>,
-  availableDevices: Ref<string[]>
+  availableDevices: Ref<{ id: string }[]>
 ) => {
   const systemLogLines = ref<string[]>([]);
   const deviceLogLines = ref<Record<string, string[]>>({});
@@ -198,7 +198,7 @@ export const useScrcpyLogs = (
 
   const logDeviceIds = computed(() => {
     const ids = new Set<string>();
-    availableDevices.value.forEach((id) => ids.add(id));
+    availableDevices.value.forEach((device) => ids.add(device.id));
     Object.keys(deviceLogLines.value).forEach((id) => ids.add(id));
     return Array.from(ids);
   });

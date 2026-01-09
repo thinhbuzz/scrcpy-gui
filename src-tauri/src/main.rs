@@ -32,6 +32,20 @@ enum ProcessState {
     StopRequested,
 }
 
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct DeviceInfo {
+    id: String,
+    label: String,
+}
+
+#[derive(Clone)]
+struct AdbDevice {
+    id: String,
+    device_name: Option<String>,
+    model_name: Option<String>,
+}
+
 fn emit_app_log(app: &tauri::AppHandle, message: impl Into<String>) {
     let _ = app.emit("app-log", message.into());
 }
@@ -204,7 +218,7 @@ fn resolve_or_read_scrcpy_path(state: &AppState, app: &tauri::AppHandle) -> Opti
 async fn get_connected_devices(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<DeviceInfo>, String> {
     let adb_path = resolve_or_read_adb_path(state.inner(), &app);
     let devices = match get_adb_devices(adb_path).await {
         Ok(devices) => devices,
@@ -216,7 +230,7 @@ async fn get_connected_devices(
             return Err(err);
         }
     };
-    let devices_set: HashSet<String> = devices.iter().cloned().collect();
+    let devices_set: HashSet<String> = devices.iter().map(|device| device.id.clone()).collect();
     match state.current_devices.lock() {
         Ok(mut current_devices) => {
             *current_devices = devices_set;
@@ -228,7 +242,7 @@ async fn get_connected_devices(
             );
         }
     }
-    Ok(devices)
+    Ok(devices.into_iter().map(build_device_info).collect())
 }
 
 #[tauri::command]
@@ -1079,7 +1093,8 @@ fn spawn_monitor_loop(app: tauri::AppHandle, state: AppState) {
                     continue;
                 }
             };
-            let devices_set: HashSet<String> = devices.into_iter().collect();
+            let devices_set: HashSet<String> =
+                devices.into_iter().map(|device| device.id).collect();
 
             let (new_devices, removed_devices) = match state.current_devices.lock() {
                 Ok(mut previous_devices) => {
@@ -1111,10 +1126,11 @@ fn spawn_monitor_loop(app: tauri::AppHandle, state: AppState) {
     });
 }
 
-async fn get_adb_devices(adb_path: Option<String>) -> Result<Vec<String>, String> {
+async fn get_adb_devices(adb_path: Option<String>) -> Result<Vec<AdbDevice>, String> {
     let mut command = create_command_with_override("adb", adb_path.as_deref());
     let output = command
         .arg("devices")
+        .arg("-l")
         .output()
         .await
         .map_err(|e| {
@@ -1134,17 +1150,45 @@ async fn get_adb_devices(adb_path: Option<String>) -> Result<Vec<String>, String
     let devices = stdout
         .lines()
         .skip(1)
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 2 && parts[1] == "device" {
-                Some(parts[0].to_string())
-            } else {
-                None
-            }
-        })
+        .filter_map(parse_adb_device_line)
         .collect();
 
     Ok(devices)
+}
+
+fn parse_adb_device_line(line: &str) -> Option<AdbDevice> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() < 2 || parts[1] != "device" {
+        return None;
+    }
+    let mut device_name = None;
+    let mut model_name = None;
+    for part in parts.iter().skip(2) {
+        if let Some((key, value)) = part.split_once(':') {
+            match key {
+                "device" => device_name = Some(value.to_string()),
+                "model" => model_name = Some(value.to_string()),
+                _ => {}
+            }
+        }
+    }
+    Some(AdbDevice {
+        id: parts[0].to_string(),
+        device_name,
+        model_name,
+    })
+}
+
+fn build_device_info(device: AdbDevice) -> DeviceInfo {
+    let extra = device.device_name.or(device.model_name);
+    let label = match extra {
+        Some(value) => format!("{}({})", device.id, value),
+        None => device.id.clone(),
+    };
+    DeviceInfo {
+        id: device.id,
+        label,
+    }
 }
 
 async fn run_adb_shell(

@@ -16,6 +16,7 @@ import {
   startDeviceMonitoring,
   startScrcpy,
   stopScrcpy,
+  type DeviceInfo,
 } from "../commands";
 import DeviceList from "./DeviceList.vue";
 import { useScrcpyLogs } from "../composables/useScrcpyLogs";
@@ -51,7 +52,7 @@ const osNotificationsEnabled = useStorage<boolean>(
   undefined,
   { mergeDefaults: true }
 );
-const availableDevices = ref<string[]>([]);
+const availableDevices = ref<DeviceInfo[]>([]);
 const startedDevices = ref<string[]>([]);
 const settingsOpen = ref(false);
 const uninstallOpen = ref(false);
@@ -168,8 +169,11 @@ const openUninstall = (deviceId?: string): void => {
   uninstallOpen.value = true;
 };
 
+const isAvailableDevice = (deviceId: string): boolean =>
+  availableDevices.value.some((device) => device.id === deviceId);
+
 const startDevice = async (deviceId: string): Promise<void> => {
-  if (!availableDevices.value.includes(deviceId)) {
+  if (!isAvailableDevice(deviceId)) {
     appendSystemLog(`Device ${deviceId} is not available.\n`);
     return;
   }
@@ -213,7 +217,7 @@ const stopDevice = async (deviceId: string): Promise<void> => {
 
 const startProcess = async (): Promise<void> => {
   const toStart = selectedDevices.value.filter((deviceId) => {
-    return availableDevices.value.includes(deviceId) && !startedDevices.value.includes(deviceId);
+    return isAvailableDevice(deviceId) && !startedDevices.value.includes(deviceId);
   });
 
   for (const deviceId of toStart) {

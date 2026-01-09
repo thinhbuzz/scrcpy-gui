@@ -19,6 +19,7 @@ import {
   setPackageEnabled,
   uninstallPackage,
   type DeviceApp,
+  type DeviceInfo,
 } from "../commands";
 
 const props = defineProps<{ open: boolean; deviceId?: string }>();
@@ -31,7 +32,7 @@ const openModel = computed({
   set: (value: boolean) => emit("update:open", value),
 });
 
-const devices = ref<string[]>([]);
+const devices = ref<DeviceInfo[]>([]);
 const selectedDeviceId = ref<string>("");
 const apps = ref<DeviceApp[]>([]);
 const loading = ref(false);
@@ -44,7 +45,7 @@ const systemFilter = ref<"all" | "system" | "user">("all");
 const selectedPackages = ref<Set<string>>(new Set());
 
 const deviceOptions = computed(() =>
-  devices.value.map((deviceId) => ({ value: deviceId, label: deviceId }))
+  devices.value.map((device) => ({ value: device.id, label: device.label }))
 );
 
 const defaultAppIcon =
@@ -141,10 +142,13 @@ const refreshDevices = async (): Promise<void> => {
   try {
     devices.value = await getDevices();
     const preferred = props.deviceId?.trim();
-    if (preferred && devices.value.includes(preferred)) {
+    if (preferred && devices.value.some((device) => device.id === preferred)) {
       selectedDeviceId.value = preferred;
-    } else if (!selectedDeviceId.value || !devices.value.includes(selectedDeviceId.value)) {
-      selectedDeviceId.value = devices.value[0] ?? "";
+    } else if (
+      !selectedDeviceId.value
+      || !devices.value.some((device) => device.id === selectedDeviceId.value)
+    ) {
+      selectedDeviceId.value = devices.value[0]?.id ?? "";
     }
   } catch (error) {
     message.error(`Failed to read devices: ${error}`);
@@ -370,7 +374,7 @@ watch(
     if (!value || !openModel.value) {
       return;
     }
-    if (devices.value.includes(value)) {
+    if (devices.value.some((device) => device.id === value)) {
       selectedDeviceId.value = value;
     }
   }
