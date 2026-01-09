@@ -11,10 +11,10 @@ use tauri::{Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
-const SERVER_FILE_NAME: &str = "scrcpy-gui-server-v1.0.1";
+const SERVER_FILE_NAME: &str = "scrcpy-gui-server";
 const SERVER_DEVICE_PATH: &str = "/data/local/tmp/scrcpy-gui-server";
 const SERVER_CLASS_NAME: &str = "me.thinhbuzz.scrcpy.gui.server.Server";
-const SERVER_BYTES: &[u8] = include_bytes!("../scrcpy-gui-server-v1.0.1");
+const SERVER_BYTES: &[u8] = include_bytes!("../scrcpy-gui-server");
 
 #[derive(Default, Clone)]
 struct AppState {
@@ -1272,6 +1272,8 @@ fn ensure_local_server_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 struct DeviceApp {
     name: String,
     package_name: String,
+    version_name: String,
+    version_code: u32,
     is_system_app: bool,
     base64_icon: String,
     is_installed_for_user: bool,

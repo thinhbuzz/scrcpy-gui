@@ -263,24 +263,9 @@ watch(
                 </Tag>
               </span>
             </div>
-            <div class="app-package">{{ app.packageName }}</div>
+            <div class="app-package">{{ app.packageName }} - {{ app.versionName }} ({{ app.versionCode }})</div>
           </div>
           <div class="app-actions">
-            <Popconfirm
-              v-if="app.isInstalledForUser"
-              :title="`Uninstall ${appLabel(app)}?`"
-              ok-text="Uninstall"
-              cancel-text="Cancel"
-              @confirm="() => uninstallApp(app)"
-            >
-              <Button
-                size="small"
-                danger
-                :loading="Boolean(uninstalling[app.packageName])"
-              >
-                Uninstall
-              </Button>
-            </Popconfirm>
             <Popconfirm
               v-if="app.isInstalledForUser"
               :title="
@@ -299,15 +284,36 @@ watch(
                 {{ app.isDisabled ? "Enable" : "Disable" }}
               </Button>
             </Popconfirm>
-            <Button
-              v-else
-              size="small"
-              type="primary"
-              :loading="Boolean(installing[app.packageName])"
-              @click="() => installApp(app)"
+            <Popconfirm
+              v-if="app.isInstalledForUser"
+              :title="`Uninstall ${appLabel(app)}?`"
+              ok-text="Uninstall"
+              cancel-text="Cancel"
+              @confirm="() => uninstallApp(app)"
             >
-              Install
-            </Button>
+              <Button
+                size="small"
+                danger
+                :loading="Boolean(uninstalling[app.packageName])"
+              >
+                Uninstall
+              </Button>
+            </Popconfirm>
+            <Popconfirm
+              v-else
+              :title="`Install ${appLabel(app)}?`"
+              ok-text="Install"
+              cancel-text="Cancel"
+              @confirm="() => installApp(app)"
+            >
+              <Button
+                size="small"
+                type="primary"
+                :loading="Boolean(installing[app.packageName])"
+              >
+                Install
+              </Button>
+            </Popconfirm>
           </div>
         </div>
       </div>

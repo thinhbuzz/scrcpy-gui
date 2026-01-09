@@ -51,6 +51,8 @@ export const downloadAndInstallScrcpy = async (): Promise<{
 
 export interface DeviceApp {
   packageName: string;
+  versionName: string;
+  versionCode: number;
   name: string;
   isSystemApp: boolean;
   base64Icon: string;
