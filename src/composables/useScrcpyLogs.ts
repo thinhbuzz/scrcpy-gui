@@ -31,7 +31,6 @@ export const useScrcpyLogs = (
   const pendingApkFailureByDevice = ref<Record<string, string>>({});
   const pendingPushByDevice = ref<Record<string, string>>({});
   const pendingPushFailureByDevice = ref<Record<string, string>>({});
-  const notifiedInstallKeys = new Set<string>();
 
   const clearAllLogs = (): void => {
     systemLogLines.value = [];
@@ -77,11 +76,6 @@ export const useScrcpyLogs = (
     success: boolean,
     detail?: string
   ): void => {
-    const key = `${deviceId}:${path}:${success ? "success" : "error"}`;
-    if (notifiedInstallKeys.has(key)) {
-      return;
-    }
-    notifiedInstallKeys.add(key);
 
     const fileName = path.split(/[\\/]/).pop() ?? path;
     const description = detail
@@ -99,11 +93,6 @@ export const useScrcpyLogs = (
     success: boolean,
     detail?: string
   ): void => {
-    const key = `${deviceId}:${path}:${success ? "push-success" : "push-error"}`;
-    if (notifiedInstallKeys.has(key)) {
-      return;
-    }
-    notifiedInstallKeys.add(key);
 
     const fileName = path.split(/[\\/]/).pop() ?? path;
     const description = detail
