@@ -84,6 +84,6 @@ jobs:
             Portable (no install)
             - [Scrcpy.GUI_x64.app.tar.gz](https://github.com/thinhbuzz/scrcpy-gui/releases/download/v__VERSION__/Scrcpy.GUI_x64.app.tar.gz): macOS Intel
             - [Scrcpy.GUI_aarch64.app.tar.gz](https://github.com/thinhbuzz/scrcpy-gui/releases/download/v__VERSION__/Scrcpy.GUI_aarch64.app.tar.gz): macOS Apple Silicon
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
