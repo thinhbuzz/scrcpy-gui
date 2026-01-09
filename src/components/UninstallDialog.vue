@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import {
   Button,
+  Checkbox,
   Empty,
   Input,
   Modal,
@@ -37,8 +38,10 @@ const loading = ref(false);
 const uninstalling = ref<Record<string, boolean>>({});
 const installing = ref<Record<string, boolean>>({});
 const toggling = ref<Record<string, boolean>>({});
+const batchRunning = ref(false);
 const searchTerm = ref("");
 const systemFilter = ref<"all" | "system" | "user">("all");
+const selectedPackages = ref<Set<string>>(new Set());
 
 const deviceOptions = computed(() =>
   devices.value.map((deviceId) => ({ value: deviceId, label: deviceId }))
@@ -73,6 +76,67 @@ const filteredApps = computed(() => {
   });
 });
 
+const selectedApps = computed(() =>
+  apps.value.filter((app) => selectedPackages.value.has(app.packageName))
+);
+
+const selectedCount = computed(() => selectedApps.value.length);
+
+const filteredSelectedCount = computed(
+  () => filteredApps.value.filter((app) => selectedPackages.value.has(app.packageName)).length
+);
+
+const allFilteredSelected = computed(
+  () => filteredApps.value.length > 0 && filteredSelectedCount.value === filteredApps.value.length
+);
+
+const someFilteredSelected = computed(
+  () => filteredSelectedCount.value > 0 && !allFilteredSelected.value
+);
+
+const updateSelected = (updater: (next: Set<string>) => void): void => {
+  const next = new Set(selectedPackages.value);
+  updater(next);
+  selectedPackages.value = next;
+};
+
+const setSelected = (packageName: string, selected: boolean): void => {
+  updateSelected((next) => {
+    if (selected) {
+      next.add(packageName);
+    } else {
+      next.delete(packageName);
+    }
+  });
+};
+
+const toggleSelectAllFiltered = (selected: boolean): void => {
+  updateSelected((next) => {
+    for (const app of filteredApps.value) {
+      if (selected) {
+        next.add(app.packageName);
+      } else {
+        next.delete(app.packageName);
+      }
+    }
+  });
+};
+
+const pruneSelection = (): void => {
+  updateSelected((next) => {
+    const available = new Set(apps.value.map((app) => app.packageName));
+    for (const packageName of next) {
+      if (!available.has(packageName)) {
+        next.delete(packageName);
+      }
+    }
+  });
+};
+
+const clearSelection = (): void => {
+  selectedPackages.value = new Set();
+};
+
 const refreshDevices = async (): Promise<void> => {
   try {
     devices.value = await getDevices();
@@ -92,13 +156,16 @@ const refreshDevices = async (): Promise<void> => {
 const refreshApps = async (): Promise<void> => {
   if (!selectedDeviceId.value) {
     apps.value = [];
+    clearSelection();
     return;
   }
   loading.value = true;
   try {
     apps.value = await listDeviceApps(selectedDeviceId.value);
+    pruneSelection();
   } catch (error) {
     apps.value = [];
+    clearSelection();
     message.error(`Failed to load apps: ${error}`);
   } finally {
     loading.value = false;
@@ -178,6 +245,115 @@ const toggleAppEnabled = async (
   }
 };
 
+const setBulkBusy = (
+  store: typeof uninstalling | typeof installing | typeof toggling,
+  appList: DeviceApp[],
+  busy: boolean
+): void => {
+  const next = { ...store.value };
+  for (const app of appList) {
+    next[app.packageName] = busy;
+  }
+  store.value = next;
+};
+
+const runBatch = async (
+  appList: DeviceApp[],
+  store: typeof uninstalling | typeof installing | typeof toggling,
+  action: (app: DeviceApp) => Promise<void>,
+  successLabel: string,
+  failureLabel: string
+): Promise<void> => {
+  if (!appList.length || batchRunning.value) {
+    return;
+  }
+  batchRunning.value = true;
+  setBulkBusy(store, appList, true);
+  const failures: Array<{ app: DeviceApp; error: unknown }> = [];
+  for (const app of appList) {
+    try {
+      await action(app);
+    } catch (error) {
+      failures.push({ app, error });
+    }
+  }
+  setBulkBusy(store, appList, false);
+  if (failures.length === 0) {
+    message.success(`${successLabel} ${appList.length} apps`);
+  } else if (failures.length === appList.length) {
+    message.error(`${failureLabel} ${appList.length} apps failed`);
+  } else {
+    message.warning(
+      `${successLabel} ${appList.length - failures.length} apps, failed to ${failureLabel.toLowerCase()} ${
+        failures.length
+      } apps`
+    );
+  }
+  await refreshApps();
+  clearSelection();
+  batchRunning.value = false;
+};
+
+const batchDisableTargets = computed(() =>
+  selectedApps.value.filter((app) => app.isInstalledForUser && !app.isDisabled)
+);
+
+const batchEnableTargets = computed(() =>
+  selectedApps.value.filter((app) => app.isInstalledForUser && app.isDisabled)
+);
+
+const batchUninstallTargets = computed(() =>
+  selectedApps.value.filter((app) => app.isInstalledForUser)
+);
+
+const batchInstallTargets = computed(() =>
+  selectedApps.value.filter((app) => !app.isInstalledForUser)
+);
+
+const batchDisable = async (): Promise<void> => {
+  await runBatch(
+    batchDisableTargets.value,
+    toggling,
+    async (app) =>
+      setPackageEnabled(selectedDeviceId.value, app.packageName, false),
+    "Disabled",
+    "Disable"
+  );
+};
+
+const batchEnable = async (): Promise<void> => {
+  await runBatch(
+    batchEnableTargets.value,
+    toggling,
+    async (app) =>
+      setPackageEnabled(selectedDeviceId.value, app.packageName, true),
+    "Enabled",
+    "Enable"
+  );
+};
+
+const batchUninstall = async (): Promise<void> => {
+  await runBatch(
+    batchUninstallTargets.value,
+    uninstalling,
+    async (app) =>
+      uninstallPackage(selectedDeviceId.value, app.packageName, app.isSystemApp),
+    "Uninstalled",
+    "Uninstall"
+  );
+};
+
+const batchInstall = async (): Promise<void> => {
+  await runBatch(
+    batchInstallTargets.value,
+    installing,
+    async (app) =>
+      installExistingPackage(selectedDeviceId.value, app.packageName),
+    "Installed",
+    "Install"
+  );
+};
+
 watch(
   () => props.open,
   (value) => {
@@ -204,6 +380,7 @@ watch(
   () => selectedDeviceId.value,
   () => {
     if (openModel.value) {
+      clearSelection();
       refreshApps();
     }
   }
@@ -241,12 +418,91 @@ watch(
       </Button>
     </div>
 
+    <div class="bulk-actions">
+      <div class="bulk-left">
+        <Checkbox
+          :checked="allFilteredSelected"
+          :indeterminate="someFilteredSelected"
+          @update:checked="toggleSelectAllFiltered"
+        >
+          Select all filtered ({{ filteredApps.length }})
+        </Checkbox>
+        <span class="bulk-count">Selected {{ selectedCount }}</span>
+      </div>
+      <div class="bulk-buttons">
+        <Popconfirm
+          title="Enable selected apps?"
+          ok-text="Enable"
+          cancel-text="Cancel"
+          @confirm="batchEnable"
+        >
+          <Button
+            size="small"
+            :disabled="batchRunning || batchEnableTargets.length === 0"
+            :loading="batchRunning && batchEnableTargets.length > 0"
+          >
+            Enable ({{ batchEnableTargets.length }})
+          </Button>
+        </Popconfirm>
+        <Popconfirm
+          title="Disable selected apps?"
+          ok-text="Disable"
+          cancel-text="Cancel"
+          @confirm="batchDisable"
+        >
+          <Button
+            size="small"
+            :disabled="batchRunning || batchDisableTargets.length === 0"
+            :loading="batchRunning && batchDisableTargets.length > 0"
+          >
+            Disable ({{ batchDisableTargets.length }})
+          </Button>
+        </Popconfirm>
+        <Popconfirm
+          title="Uninstall selected apps?"
+          ok-text="Uninstall"
+          cancel-text="Cancel"
+          @confirm="batchUninstall"
+        >
+          <Button
+            size="small"
+            danger
+            :disabled="batchRunning || batchUninstallTargets.length === 0"
+            :loading="batchRunning && batchUninstallTargets.length > 0"
+          >
+            Uninstall ({{ batchUninstallTargets.length }})
+          </Button>
+        </Popconfirm>
+        <Popconfirm
+          title="Install selected apps?"
+          ok-text="Install"
+          cancel-text="Cancel"
+          @confirm="batchInstall"
+        >
+          <Button
+            size="small"
+            type="primary"
+            :disabled="batchRunning || batchInstallTargets.length === 0"
+            :loading="batchRunning && batchInstallTargets.length > 0"
+          >
+            Install ({{ batchInstallTargets.length }})
+          </Button>
+        </Popconfirm>
+      </div>
+    </div>
+
     <Spin :spinning="loading">
       <div v-if="!filteredApps.length" class="empty-state">
         <Empty description="No apps found" />
       </div>
       <div v-else class="app-list">
         <div v-for="app in filteredApps" :key="app.packageName" class="app-row">
+          <div class="app-select">
+            <Checkbox
+              :checked="selectedPackages.has(app.packageName)"
+              @update:checked="(checked) => setSelected(app.packageName, checked)"
+            />
+          </div>
           <div class="app-icon">
             <img :src="appIconSrc(app)" alt="" />
           </div>
@@ -335,6 +591,37 @@ watch(
   width: 100%;
 }
 
+.bulk-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid #ececec;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  background: #fafafa;
+}
+
+.bulk-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bulk-count {
+  font-size: 12px;
+  color: #6d6d6d;
+}
+
+.bulk-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .app-list {
   display: flex;
   flex-direction: column;
@@ -346,12 +633,18 @@ watch(
 
 .app-row {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto auto 1fr auto;
   gap: 12px;
   align-items: center;
   padding: 10px;
   border: 1px solid #ececec;
   border-radius: 8px;
+}
+
+.app-select {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .app-icon {
@@ -415,9 +708,18 @@ watch(
     grid-template-columns: 1fr;
   }
 
+  .bulk-actions {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .bulk-buttons {
+    justify-content: flex-start;
+  }
+
   .app-row {
     grid-template-columns: auto 1fr;
-    grid-template-rows: auto auto auto;
+    grid-template-rows: auto auto auto auto;
   }
 
   .app-status,
