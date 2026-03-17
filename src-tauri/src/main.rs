@@ -1564,6 +1564,11 @@ fn main() {
             set_package_enabled
         ])
         .setup(|app| {
+            // Set window title with app version
+            if let Some(window) = app.get_webview_window("main") {
+                let version = app.package_info().version.to_string();
+                let _ = window.set_title(&format!("Scrcpy GUI v{}", version));
+            }
             let state = app.state::<AppState>();
             if let Ok(path) = tool_paths_file(app.handle()) {
                 match std::fs::read_to_string(&path) {
