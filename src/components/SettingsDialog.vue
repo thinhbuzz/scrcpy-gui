@@ -8,6 +8,7 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
+import { platform } from "@tauri-apps/plugin-os";
 import {
   downloadAndInstallScrcpy,
   getToolPaths,
@@ -37,6 +38,12 @@ const osNotificationsEnabled = useStorage<boolean>(
   undefined,
   { mergeDefaults: true }
 );
+const notificationPermissionGrantedCache = useStorage<boolean>(
+  "notificationPermissionGrantedCache",
+  false,
+  undefined,
+  { mergeDefaults: true }
+);
 const toolsMissing = computed(() => {
   return !adbPath.value.trim() || !scrcpyPath.value.trim();
 });
@@ -49,7 +56,10 @@ const isNotificationBusy = ref(false);
 
 const refreshPermission = async (): Promise<void> => {
   try {
-    const granted = await isPermissionGranted();
+    let granted = await isPermissionGranted();
+    if (!granted && platform() === "windows" && notificationPermissionGrantedCache.value) {
+      granted = true;
+    }
     permissionGranted.value = granted;
   } catch (error) {
     permissionNote.value = `Failed to read permission: ${error}`;
@@ -72,10 +82,12 @@ const toggleNotifications = async (checked: boolean): Promise<void> => {
     permissionGranted.value = granted;
     if (!granted) {
       osNotificationsEnabled.value = false;
+      notificationPermissionGrantedCache.value = false;
       permissionNote.value =
         "Notification permission denied. Enable it in system settings.";
       return;
     }
+    notificationPermissionGrantedCache.value = true;
     osNotificationsEnabled.value = true;
   } catch (error) {
     osNotificationsEnabled.value = false;
@@ -96,10 +108,12 @@ const sendTestNotification = async (): Promise<void> => {
     }
     permissionGranted.value = granted;
     if (!granted) {
+      notificationPermissionGrantedCache.value = false;
       permissionNote.value =
         "Notification permission denied. Enable it in system settings.";
       return;
     }
+    notificationPermissionGrantedCache.value = true;
     const sendPromise = sendNotification({
       title: "Scrcpy GUI",
       body: "This is a test notification.",
