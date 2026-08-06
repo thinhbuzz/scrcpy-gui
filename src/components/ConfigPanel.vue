@@ -10,6 +10,8 @@ import {
   Tabs,
 } from "ant-design-vue";
 import { useStorage } from "@vueuse/core";
+import { requestPermission } from "@tauri-apps/plugin-notification";
+import { platform } from "@tauri-apps/plugin-os";
 import {
   getDevices,
   openDeviceTerminal,
@@ -123,6 +125,12 @@ onMounted(() => {
       hasSeenToolWarning.value = true;
     }
   });
+  // On Windows, isPermissionGranted() can return false after app restart even
+  // though the user previously granted permission. Proactively re-register the
+  // COM toast activator so notifications work without needing to open Settings.
+  if (osNotificationsEnabled.value && platform() === "windows") {
+    void requestPermission();
+  }
 });
 
 onUnmounted(() => {
