@@ -78,7 +78,6 @@ const {
   setActiveLogTab,
 } = useScrcpyLogs(osNotificationsEnabled, availableDevices);
 const {
-  toolPaths,
   refreshToolPaths,
   toolsMissing,
   scrcpyMissing,
@@ -195,7 +194,7 @@ const startDevice = async (deviceId: string): Promise<void> => {
 
   try {
     await refreshToolPaths();
-    if (scrcpyMissing.value && toolPaths.value?.adbPath) {
+    if (scrcpyMissing.value) {
       appendSystemLog(
         "[Frontend] scrcpy not found. Configure scrcpy path in Settings.\n"
       );

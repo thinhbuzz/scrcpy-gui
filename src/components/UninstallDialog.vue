@@ -334,6 +334,7 @@ watch(
         placeholder="Select device"
         size="small"
         class="device-select"
+        :disabled="batchRunning"
       />
       <Select
         v-model:value="systemFilter"
@@ -344,14 +345,16 @@ watch(
           { value: 'system', label: 'System apps' },
           { value: 'user', label: 'User apps' },
         ]"
+        :disabled="batchRunning"
       />
       <Input
         v-model:value="searchTerm"
         placeholder="Search by app name or package"
         size="small"
         allow-clear
+        :disabled="batchRunning"
       />
-      <Button size="small" @click="refreshDevices().then(() => refreshApps())">
+      <Button size="small" :disabled="batchRunning" @click="refreshDevices().then(() => refreshApps())">
         Refresh
       </Button>
     </div>
