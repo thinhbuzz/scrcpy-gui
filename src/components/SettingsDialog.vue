@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { Button, Input, Modal, Switch } from "ant-design-vue";
+import { Button, Input, Modal, Switch, message } from "ant-design-vue";
 import { useStorage } from "@vueuse/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -124,16 +124,24 @@ const pickPath = async (label: string): Promise<string | null> => {
 };
 
 const pickAdbPath = async (): Promise<void> => {
-  const selected = await pickPath("adb");
-  if (selected) {
-    adbPath.value = selected;
+  try {
+    const selected = await pickPath("adb");
+    if (selected) {
+      adbPath.value = selected;
+    }
+  } catch (error) {
+    message.error(`Failed to open file picker: ${error}`);
   }
 };
 
 const pickScrcpyPath = async (): Promise<void> => {
-  const selected = await pickPath("scrcpy");
-  if (selected) {
-    scrcpyPath.value = selected;
+  try {
+    const selected = await pickPath("scrcpy");
+    if (selected) {
+      scrcpyPath.value = selected;
+    }
+  } catch (error) {
+    message.error(`Failed to open file picker: ${error}`);
   }
 };
 
@@ -144,6 +152,7 @@ const syncToolPaths = async (): Promise<void> => {
     await setAdbPath(adbValue.length > 0 ? adbValue : null);
     await setScrcpyPath(scrcpyValue.length > 0 ? scrcpyValue : null);
   } catch (error) {
+    message.error(`Failed to sync tool paths: ${error}`);
   }
 };
 
@@ -161,6 +170,7 @@ const downloadScrcpy = async (): Promise<void> => {
       scrcpyPath.value = paths.scrcpyPath;
     }
   } catch (error) {
+    message.error(`Failed to download scrcpy: ${error}`);
   } finally {
     isDownloadingScrcpy.value = false;
   }
@@ -176,6 +186,7 @@ watch(
       const trimmed = value.trim();
       await setAdbPath(trimmed.length > 0 ? trimmed : null);
     } catch (error) {
+      console.error("Failed to sync adb path:", error);
     }
   }
 );
@@ -190,6 +201,7 @@ watch(
       const trimmed = value.trim();
       await setScrcpyPath(trimmed.length > 0 ? trimmed : null);
     } catch (error) {
+      console.error("Failed to sync scrcpy path:", error);
     }
   }
 );

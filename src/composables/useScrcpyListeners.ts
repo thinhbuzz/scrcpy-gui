@@ -24,55 +24,71 @@ export const useScrcpyListeners = (options: UseScrcpyListenersOptions) => {
   let appLogUnlisten: (() => void) | null = null;
 
   const setupListeners = async (): Promise<void> => {
-    deviceConnectedUnlisten = await listen<string[]>(
-      "device-connected",
-      (event) => {
-        const newDevices = event.payload;
-        options.appendSystemLog(
-          `Device(s) connected: ${newDevices.join(", ")}\n`
-        );
-        options.refreshDevices();
-      }
-    );
+    // Clean up any previously registered listeners to prevent memory leaks
+    // if setupListeners() is called multiple times.
+    cleanup();
 
-    deviceDisconnectedUnlisten = await listen<string[]>(
-      "device-disconnected",
-      (event) => {
-        const removedDevices = event.payload;
-        options.appendSystemLog(
-          `Device(s) disconnected: ${removedDevices.join(", ")}\n`
-        );
-
-        removedDevices.forEach((deviceId) => {
-          const selectedIndex = options.selectedDevices.value.indexOf(deviceId);
-          if (selectedIndex !== -1) {
-            options.selectedDevices.value.splice(selectedIndex, 1);
-          }
-
-          if (options.startedDevices.value.includes(deviceId)) {
-            options.stopScrcpy(deviceId).catch((error) => {
-              options.appendSystemLog(
-                `Failed to stop scrcpy for ${deviceId}: ${error}\n`
-              );
-            });
-            options.startedDevices.value = options.startedDevices.value.filter(
-              (id) => id !== deviceId
-            );
-          }
-        });
-
-        if (
-          options.uninstallOpen.value
-          && options.selectedUninstallDevice.value
-          && removedDevices.includes(options.selectedUninstallDevice.value)
-        ) {
-          options.uninstallOpen.value = false;
-          options.selectedUninstallDevice.value = "";
+    try {
+      deviceConnectedUnlisten = await listen<string[]>(
+        "device-connected",
+        (event) => {
+          const newDevices = event.payload;
+          options.appendSystemLog(
+            `Device(s) connected: ${newDevices.join(", ")}\n`
+          );
+          options.refreshDevices();
         }
+      );
+    } catch (error) {
+      options.appendSystemLog(
+        `[Frontend] Error setting up device-connected listener: ${error}\n`
+      );
+    }
 
-        options.refreshDevices();
-      }
-    );
+    try {
+      deviceDisconnectedUnlisten = await listen<string[]>(
+        "device-disconnected",
+        (event) => {
+          const removedDevices = event.payload;
+          options.appendSystemLog(
+            `Device(s) disconnected: ${removedDevices.join(", ")}\n`
+          );
+
+          removedDevices.forEach((deviceId) => {
+            const selectedIndex = options.selectedDevices.value.indexOf(deviceId);
+            if (selectedIndex !== -1) {
+              options.selectedDevices.value.splice(selectedIndex, 1);
+            }
+
+            if (options.startedDevices.value.includes(deviceId)) {
+              options.stopScrcpy(deviceId).catch((error) => {
+                options.appendSystemLog(
+                  `Failed to stop scrcpy for ${deviceId}: ${error}\n`
+                );
+              });
+              options.startedDevices.value = options.startedDevices.value.filter(
+                (id) => id !== deviceId
+              );
+            }
+          });
+
+          if (
+            options.uninstallOpen.value
+            && options.selectedUninstallDevice.value
+            && removedDevices.includes(options.selectedUninstallDevice.value)
+          ) {
+            options.uninstallOpen.value = false;
+            options.selectedUninstallDevice.value = "";
+          }
+
+          options.refreshDevices();
+        }
+      );
+    } catch (error) {
+      options.appendSystemLog(
+        `[Frontend] Error setting up device-disconnected listener: ${error}\n`
+      );
+    }
 
     try {
       scrcpyLogUnlisten = await listen<LogPayload>("scrcpy-log", (event) => {
@@ -85,22 +101,34 @@ export const useScrcpyListeners = (options: UseScrcpyListenersOptions) => {
       );
     }
 
-    scrcpyExitUnlisten = await listen<[string, number | null]>(
-      "scrcpy-exit",
-      (event) => {
-        const [deviceId, exitCode] = event.payload;
-        options.appendSystemLog(
-          `Device ${deviceId} scrcpy exited with code ${exitCode ?? "null"}\n`
-        );
-        options.startedDevices.value = options.startedDevices.value.filter(
-          (id) => id !== deviceId
-        );
-      }
-    );
+    try {
+      scrcpyExitUnlisten = await listen<[string, number | null]>(
+        "scrcpy-exit",
+        (event) => {
+          const [deviceId, exitCode] = event.payload;
+          options.appendSystemLog(
+            `Device ${deviceId} scrcpy exited with code ${exitCode ?? "null"}\n`
+          );
+          options.startedDevices.value = options.startedDevices.value.filter(
+            (id) => id !== deviceId
+          );
+        }
+      );
+    } catch (error) {
+      options.appendSystemLog(
+        `[Frontend] Error setting up scrcpy-exit listener: ${error}\n`
+      );
+    }
 
-    appLogUnlisten = await listen<string>("app-log", (event) => {
-      options.appendSystemLog(event.payload);
-    });
+    try {
+      appLogUnlisten = await listen<string>("app-log", (event) => {
+        options.appendSystemLog(event.payload);
+      });
+    } catch (error) {
+      options.appendSystemLog(
+        `[Frontend] Error setting up app-log listener: ${error}\n`
+      );
+    }
   };
 
   const cleanup = (): void => {

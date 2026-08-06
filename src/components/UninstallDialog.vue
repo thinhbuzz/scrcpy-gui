@@ -1,17 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import {
-  Button,
-  Checkbox,
-  Empty,
-  Input,
-  Modal,
-  Popconfirm,
-  Select,
-  Spin,
-  Tag,
-  message,
-} from "ant-design-vue";
+import { Button, Input, Modal, Select, message } from "ant-design-vue";
 import {
   getDevices,
   installExistingPackage,
@@ -21,6 +10,8 @@ import {
   type DeviceApp,
   type DeviceInfo,
 } from "../commands";
+import AppList from "./AppList.vue";
+import BatchActions from "./BatchActions.vue";
 
 const props = defineProps<{ open: boolean; deviceId?: string }>();
 const emit = defineEmits<{
@@ -44,32 +35,18 @@ const searchTerm = ref("");
 const systemFilter = ref<"all" | "system" | "user">("all");
 const selectedPackages = ref<Set<string>>(new Set());
 
+const appLabel = (app: DeviceApp): string => app.name || app.packageName;
+
 const deviceOptions = computed(() =>
   devices.value.map((device) => ({ value: device.id, label: device.label }))
 );
 
-const defaultAppIcon =
-  "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";
-
-const appLabel = (app: DeviceApp): string => app.name || app.packageName;
-
-const appIconSrc = (app: DeviceApp): string => {
-  const icon = app.base64Icon?.trim() || defaultAppIcon;
-  return `data:image/png;base64,${icon}`;
-};
-
 const filteredApps = computed(() => {
   const term = searchTerm.value.trim().toLowerCase();
   return apps.value.filter((app) => {
-    if (systemFilter.value === "system" && !app.isSystemApp) {
-      return false;
-    }
-    if (systemFilter.value === "user" && app.isSystemApp) {
-      return false;
-    }
-    if (!term) {
-      return true;
-    }
+    if (systemFilter.value === "system" && !app.isSystemApp) return false;
+    if (systemFilter.value === "user" && app.isSystemApp) return false;
+    if (!term) return true;
     return (
       appLabel(app).toLowerCase().includes(term) ||
       app.packageName.toLowerCase().includes(term)
@@ -84,17 +61,35 @@ const selectedApps = computed(() =>
 const selectedCount = computed(() => selectedApps.value.length);
 
 const filteredSelectedCount = computed(
-  () => filteredApps.value.filter((app) => selectedPackages.value.has(app.packageName)).length
+  () =>
+    filteredApps.value.filter((app) => selectedPackages.value.has(app.packageName))
+      .length
 );
 
 const allFilteredSelected = computed(
-  () => filteredApps.value.length > 0 && filteredSelectedCount.value === filteredApps.value.length
+  () =>
+    filteredApps.value.length > 0 &&
+    filteredSelectedCount.value === filteredApps.value.length
 );
 
 const someFilteredSelected = computed(
   () => filteredSelectedCount.value > 0 && !allFilteredSelected.value
 );
 
+const batchDisableTargets = computed(() =>
+  selectedApps.value.filter((app) => app.isInstalledForUser && !app.isDisabled)
+);
+const batchEnableTargets = computed(() =>
+  selectedApps.value.filter((app) => app.isInstalledForUser && app.isDisabled)
+);
+const batchUninstallTargets = computed(() =>
+  selectedApps.value.filter((app) => app.isInstalledForUser)
+);
+const batchInstallTargets = computed(() =>
+  selectedApps.value.filter((app) => !app.isInstalledForUser)
+);
+
+// Selection helpers
 const updateSelected = (updater: (next: Set<string>) => void): void => {
   const next = new Set(selectedPackages.value);
   updater(next);
@@ -103,22 +98,16 @@ const updateSelected = (updater: (next: Set<string>) => void): void => {
 
 const setSelected = (packageName: string, selected: boolean): void => {
   updateSelected((next) => {
-    if (selected) {
-      next.add(packageName);
-    } else {
-      next.delete(packageName);
-    }
+    if (selected) next.add(packageName);
+    else next.delete(packageName);
   });
 };
 
 const toggleSelectAllFiltered = (selected: boolean): void => {
   updateSelected((next) => {
     for (const app of filteredApps.value) {
-      if (selected) {
-        next.add(app.packageName);
-      } else {
-        next.delete(app.packageName);
-      }
+      if (selected) next.add(app.packageName);
+      else next.delete(app.packageName);
     }
   });
 };
@@ -126,10 +115,8 @@ const toggleSelectAllFiltered = (selected: boolean): void => {
 const pruneSelection = (): void => {
   updateSelected((next) => {
     const available = new Set(apps.value.map((app) => app.packageName));
-    for (const packageName of next) {
-      if (!available.has(packageName)) {
-        next.delete(packageName);
-      }
+    for (const pkg of next) {
+      if (!available.has(pkg)) next.delete(pkg);
     }
   });
 };
@@ -138,15 +125,16 @@ const clearSelection = (): void => {
   selectedPackages.value = new Set();
 };
 
+// Data fetching
 const refreshDevices = async (): Promise<void> => {
   try {
     devices.value = await getDevices();
     const preferred = props.deviceId?.trim();
-    if (preferred && devices.value.some((device) => device.id === preferred)) {
+    if (preferred && devices.value.some((d) => d.id === preferred)) {
       selectedDeviceId.value = preferred;
     } else if (
-      !selectedDeviceId.value
-      || !devices.value.some((device) => device.id === selectedDeviceId.value)
+      !selectedDeviceId.value ||
+      !devices.value.some((d) => d.id === selectedDeviceId.value)
     ) {
       selectedDeviceId.value = devices.value[0]?.id ?? "";
     }
@@ -176,36 +164,28 @@ const refreshApps = async (): Promise<void> => {
   }
 };
 
+// Individual actions
 const uninstallApp = async (app: DeviceApp): Promise<void> => {
-  if (uninstalling.value[app.packageName]) {
-    return;
-  }
-  uninstalling.value = {
-    ...uninstalling.value,
-    [app.packageName]: true,
-  };
+  if (uninstalling.value[app.packageName]) return;
+  uninstalling.value = { ...uninstalling.value, [app.packageName]: true };
   try {
-    await uninstallPackage(selectedDeviceId.value, app.packageName, app.isSystemApp);
+    await uninstallPackage(
+      selectedDeviceId.value,
+      app.packageName,
+      app.isSystemApp
+    );
     message.success(`Uninstalled ${appLabel(app)}`);
     await refreshApps();
   } catch (error) {
     message.error(`Failed to uninstall ${appLabel(app)}: ${error}`);
   } finally {
-    uninstalling.value = {
-      ...uninstalling.value,
-      [app.packageName]: false,
-    };
+    uninstalling.value = { ...uninstalling.value, [app.packageName]: false };
   }
 };
 
 const installApp = async (app: DeviceApp): Promise<void> => {
-  if (installing.value[app.packageName]) {
-    return;
-  }
-  installing.value = {
-    ...installing.value,
-    [app.packageName]: true,
-  };
+  if (installing.value[app.packageName]) return;
+  installing.value = { ...installing.value, [app.packageName]: true };
   try {
     await installExistingPackage(selectedDeviceId.value, app.packageName);
     message.success(`Installed ${appLabel(app)}`);
@@ -213,10 +193,7 @@ const installApp = async (app: DeviceApp): Promise<void> => {
   } catch (error) {
     message.error(`Failed to install ${appLabel(app)}: ${error}`);
   } finally {
-    installing.value = {
-      ...installing.value,
-      [app.packageName]: false,
-    };
+    installing.value = { ...installing.value, [app.packageName]: false };
   }
 };
 
@@ -224,40 +201,29 @@ const toggleAppEnabled = async (
   app: DeviceApp,
   enabled: boolean
 ): Promise<void> => {
-  if (toggling.value[app.packageName]) {
-    return;
-  }
-  toggling.value = {
-    ...toggling.value,
-    [app.packageName]: true,
-  };
+  if (toggling.value[app.packageName]) return;
+  toggling.value = { ...toggling.value, [app.packageName]: true };
   try {
     await setPackageEnabled(selectedDeviceId.value, app.packageName, enabled);
-    message.success(
-      `${enabled ? "Enabled" : "Disabled"} ${appLabel(app)}`
-    );
+    message.success(`${enabled ? "Enabled" : "Disabled"} ${appLabel(app)}`);
     await refreshApps();
   } catch (error) {
     message.error(
       `Failed to ${enabled ? "enable" : "disable"} ${appLabel(app)}: ${error}`
     );
   } finally {
-    toggling.value = {
-      ...toggling.value,
-      [app.packageName]: false,
-    };
+    toggling.value = { ...toggling.value, [app.packageName]: false };
   }
 };
 
+// Batch helpers
 const setBulkBusy = (
   store: typeof uninstalling | typeof installing | typeof toggling,
   appList: DeviceApp[],
   busy: boolean
 ): void => {
   const next = { ...store.value };
-  for (const app of appList) {
-    next[app.packageName] = busy;
-  }
+  for (const app of appList) next[app.packageName] = busy;
   store.value = next;
 };
 
@@ -268,9 +234,7 @@ const runBatch = async (
   successLabel: string,
   failureLabel: string
 ): Promise<void> => {
-  if (!appList.length || batchRunning.value) {
-    return;
-  }
+  if (!appList.length || batchRunning.value) return;
   batchRunning.value = true;
   setBulkBusy(store, appList, true);
   const failures: Array<{ app: DeviceApp; error: unknown }> = [];
@@ -288,9 +252,8 @@ const runBatch = async (
     message.error(`${failureLabel} ${appList.length} apps failed`);
   } else {
     message.warning(
-      `${successLabel} ${appList.length - failures.length} apps, failed to ${failureLabel.toLowerCase()} ${
-        failures.length
-      } apps`
+      `${successLabel} ${appList.length - failures.length} apps, ` +
+        `failed to ${failureLabel.toLowerCase()} ${failures.length} apps`
     );
   }
   await refreshApps();
@@ -298,72 +261,45 @@ const runBatch = async (
   batchRunning.value = false;
 };
 
-const batchDisableTargets = computed(() =>
-  selectedApps.value.filter((app) => app.isInstalledForUser && !app.isDisabled)
-);
-
-const batchEnableTargets = computed(() =>
-  selectedApps.value.filter((app) => app.isInstalledForUser && app.isDisabled)
-);
-
-const batchUninstallTargets = computed(() =>
-  selectedApps.value.filter((app) => app.isInstalledForUser)
-);
-
-const batchInstallTargets = computed(() =>
-  selectedApps.value.filter((app) => !app.isInstalledForUser)
-);
-
-const batchDisable = async (): Promise<void> => {
-  await runBatch(
+const batchDisable = () =>
+  runBatch(
     batchDisableTargets.value,
     toggling,
-    async (app) =>
-      setPackageEnabled(selectedDeviceId.value, app.packageName, false),
+    (app) => setPackageEnabled(selectedDeviceId.value, app.packageName, false),
     "Disabled",
     "Disable"
   );
-};
-
-const batchEnable = async (): Promise<void> => {
-  await runBatch(
+const batchEnable = () =>
+  runBatch(
     batchEnableTargets.value,
     toggling,
-    async (app) =>
-      setPackageEnabled(selectedDeviceId.value, app.packageName, true),
+    (app) => setPackageEnabled(selectedDeviceId.value, app.packageName, true),
     "Enabled",
     "Enable"
   );
-};
-
-const batchUninstall = async (): Promise<void> => {
-  await runBatch(
+const batchUninstall = () =>
+  runBatch(
     batchUninstallTargets.value,
     uninstalling,
-    async (app) =>
+    (app) =>
       uninstallPackage(selectedDeviceId.value, app.packageName, app.isSystemApp),
     "Uninstalled",
     "Uninstall"
   );
-};
-
-const batchInstall = async (): Promise<void> => {
-  await runBatch(
+const batchInstall = () =>
+  runBatch(
     batchInstallTargets.value,
     installing,
-    async (app) =>
-      installExistingPackage(selectedDeviceId.value, app.packageName),
+    (app) => installExistingPackage(selectedDeviceId.value, app.packageName),
     "Installed",
     "Install"
   );
-};
 
+// Watchers
 watch(
   () => props.open,
   (value) => {
-    if (value) {
-      refreshDevices().then(() => refreshApps());
-    }
+    if (value) refreshDevices().then(() => refreshApps());
   },
   { immediate: true }
 );
@@ -371,10 +307,8 @@ watch(
 watch(
   () => props.deviceId,
   (value) => {
-    if (!value || !openModel.value) {
-      return;
-    }
-    if (devices.value.some((device) => device.id === value)) {
+    if (!value || !openModel.value) return;
+    if (devices.value.some((d) => d.id === value)) {
       selectedDeviceId.value = value;
     }
   }
@@ -422,162 +356,36 @@ watch(
       </Button>
     </div>
 
-    <div class="bulk-actions">
-      <div class="bulk-left">
-        <Checkbox
-          :checked="allFilteredSelected"
-          :indeterminate="someFilteredSelected"
-          @update:checked="toggleSelectAllFiltered"
-        >
-          Select all filtered ({{ filteredApps.length }})
-        </Checkbox>
-        <span class="bulk-count">Selected {{ selectedCount }}</span>
-      </div>
-      <div class="bulk-buttons">
-        <Popconfirm
-          title="Enable selected apps?"
-          ok-text="Enable"
-          cancel-text="Cancel"
-          @confirm="batchEnable"
-        >
-          <Button
-            size="small"
-            :disabled="batchRunning || batchEnableTargets.length === 0"
-            :loading="batchRunning && batchEnableTargets.length > 0"
-          >
-            Enable ({{ batchEnableTargets.length }})
-          </Button>
-        </Popconfirm>
-        <Popconfirm
-          title="Disable selected apps?"
-          ok-text="Disable"
-          cancel-text="Cancel"
-          @confirm="batchDisable"
-        >
-          <Button
-            size="small"
-            :disabled="batchRunning || batchDisableTargets.length === 0"
-            :loading="batchRunning && batchDisableTargets.length > 0"
-          >
-            Disable ({{ batchDisableTargets.length }})
-          </Button>
-        </Popconfirm>
-        <Popconfirm
-          title="Uninstall selected apps?"
-          ok-text="Uninstall"
-          cancel-text="Cancel"
-          @confirm="batchUninstall"
-        >
-          <Button
-            size="small"
-            danger
-            :disabled="batchRunning || batchUninstallTargets.length === 0"
-            :loading="batchRunning && batchUninstallTargets.length > 0"
-          >
-            Uninstall ({{ batchUninstallTargets.length }})
-          </Button>
-        </Popconfirm>
-        <Popconfirm
-          title="Install selected apps?"
-          ok-text="Install"
-          cancel-text="Cancel"
-          @confirm="batchInstall"
-        >
-          <Button
-            size="small"
-            type="primary"
-            :disabled="batchRunning || batchInstallTargets.length === 0"
-            :loading="batchRunning && batchInstallTargets.length > 0"
-          >
-            Install ({{ batchInstallTargets.length }})
-          </Button>
-        </Popconfirm>
-      </div>
-    </div>
+    <BatchActions
+      :batch-enable-targets="batchEnableTargets"
+      :batch-disable-targets="batchDisableTargets"
+      :batch-uninstall-targets="batchUninstallTargets"
+      :batch-install-targets="batchInstallTargets"
+      :batch-running="batchRunning"
+      :filtered-count="filteredApps.length"
+      :selected-count="selectedCount"
+      :all-filtered-selected="allFilteredSelected"
+      :some-filtered-selected="someFilteredSelected"
+      @select-all-filtered="toggleSelectAllFiltered"
+      @batch-enable="batchEnable"
+      @batch-disable="batchDisable"
+      @batch-uninstall="batchUninstall"
+      @batch-install="batchInstall"
+    />
 
-    <Spin :spinning="loading">
-      <div v-if="!filteredApps.length" class="empty-state">
-        <Empty description="No apps found" />
-      </div>
-      <div v-else class="app-list">
-        <div v-for="app in filteredApps" :key="app.packageName" class="app-row">
-          <div class="app-select">
-            <Checkbox
-              :checked="selectedPackages.has(app.packageName)"
-              @update:checked="(checked) => setSelected(app.packageName, checked)"
-            />
-          </div>
-          <div class="app-icon">
-            <img :src="appIconSrc(app)" alt="" />
-          </div>
-          <div class="app-info">
-            <div class="app-name">
-              <span class="app-title">{{ appLabel(app) }}</span>
-              <span class="app-tags">
-                <Tag v-if="app.isSystemApp" color="geekblue">System</Tag>
-                <Tag
-                  v-if="app.isInstalledForUser"
-                  :color="app.isDisabled ? 'red' : 'green'"
-                >
-                  {{ app.isDisabled ? "Disabled" : "Enabled" }}
-                </Tag>
-              </span>
-            </div>
-            <div class="app-package">{{ app.packageName }} - {{ app.versionName }} ({{ app.versionCode }})</div>
-          </div>
-          <div class="app-actions">
-            <Popconfirm
-              v-if="app.isInstalledForUser"
-              :title="
-                app.isDisabled
-                  ? `Enable ${appLabel(app)}?`
-                  : `Disable ${appLabel(app)}?`
-              "
-              :ok-text="app.isDisabled ? 'Enable' : 'Disable'"
-              cancel-text="Cancel"
-              @confirm="() => toggleAppEnabled(app, app.isDisabled)"
-            >
-              <Button
-                size="small"
-                :loading="Boolean(toggling[app.packageName])"
-              >
-                {{ app.isDisabled ? "Enable" : "Disable" }}
-              </Button>
-            </Popconfirm>
-            <Popconfirm
-              v-if="app.isInstalledForUser"
-              :title="`Uninstall ${appLabel(app)}?`"
-              ok-text="Uninstall"
-              cancel-text="Cancel"
-              @confirm="() => uninstallApp(app)"
-            >
-              <Button
-                size="small"
-                danger
-                :loading="Boolean(uninstalling[app.packageName])"
-              >
-                Uninstall
-              </Button>
-            </Popconfirm>
-            <Popconfirm
-              v-else
-              :title="`Install ${appLabel(app)}?`"
-              ok-text="Install"
-              cancel-text="Cancel"
-              @confirm="() => installApp(app)"
-            >
-              <Button
-                size="small"
-                type="primary"
-                :loading="Boolean(installing[app.packageName])"
-              >
-                Install
-              </Button>
-            </Popconfirm>
-          </div>
-        </div>
-      </div>
-    </Spin>
+    <AppList
+      :filtered-apps="filteredApps"
+      :selected-packages="selectedPackages"
+      :uninstalling="uninstalling"
+      :installing="installing"
+      :toggling="toggling"
+      :batch-running="batchRunning"
+      :loading="loading"
+      @select="setSelected"
+      @uninstall="uninstallApp"
+      @install="installApp"
+      @toggle-enabled="(app) => toggleAppEnabled(app, app.isDisabled)"
+    />
   </Modal>
 </template>
 
@@ -595,140 +403,9 @@ watch(
   width: 100%;
 }
 
-.bulk-actions {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 12px;
-  align-items: center;
-  padding: 8px 10px;
-  border: 1px solid #ececec;
-  border-radius: 8px;
-  margin-bottom: 12px;
-  background: #fafafa;
-}
-
-.bulk-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.bulk-count {
-  font-size: 12px;
-  color: #6d6d6d;
-}
-
-.bulk-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  justify-content: flex-end;
-}
-
-.app-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 520px;
-  overflow: auto;
-  padding-right: 4px;
-}
-
-.app-row {
-  display: grid;
-  grid-template-columns: auto auto 1fr auto;
-  gap: 12px;
-  align-items: center;
-  padding: 10px;
-  border: 1px solid #ececec;
-  border-radius: 8px;
-}
-
-.app-select {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.app-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #f4f4f4;
-  overflow: hidden;
-}
-
-.app-icon img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.app-info {
-  min-width: 0;
-}
-
-.app-name {
-  font-weight: 600;
-  color: #1b1b1b;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.app-title {
-  min-width: 0;
-}
-
-.app-tags {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.app-package {
-  font-size: 12px;
-  color: #6d6d6d;
-  word-break: break-all;
-}
-
-.app-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.empty-state {
-  padding: 24px 0;
-}
-
 @media (max-width: 720px) {
   .toolbar {
     grid-template-columns: 1fr;
-  }
-
-  .bulk-actions {
-    grid-template-columns: 1fr;
-    align-items: stretch;
-  }
-
-  .bulk-buttons {
-    justify-content: flex-start;
-  }
-
-  .app-row {
-    grid-template-columns: auto 1fr;
-    grid-template-rows: auto auto auto auto;
-  }
-
-  .app-status,
-  .app-actions {
-    justify-content: flex-start;
   }
 }
 </style>
