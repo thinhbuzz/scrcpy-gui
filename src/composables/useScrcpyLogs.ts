@@ -140,6 +140,7 @@ export const useScrcpyLogs = (
       if (adbFailedMatch[2]) {
         pendingApkFailureByDevice.value[deviceId] = adbFailedMatch[2];
       }
+      return;
     }
 
     const pushRequestMatch = line.match(pushRequestRe);
@@ -177,6 +178,7 @@ export const useScrcpyLogs = (
       if (adbPushFailedMatch[2]) {
         pendingPushFailureByDevice.value[deviceId] = adbPushFailedMatch[2];
       }
+      return;
     }
   };
 
@@ -206,6 +208,13 @@ export const useScrcpyLogs = (
     activeLogTab.value = deviceId;
   };
 
+  const cleanDeviceState = (deviceId: string): void => {
+    delete pendingApkInstallByDevice.value[deviceId];
+    delete pendingApkFailureByDevice.value[deviceId];
+    delete pendingPushByDevice.value[deviceId];
+    delete pendingPushFailureByDevice.value[deviceId];
+  };
+
   return {
     systemLogLines,
     deviceLogLines,
@@ -215,5 +224,6 @@ export const useScrcpyLogs = (
     appendSystemLog,
     handleScrcpyLog,
     setActiveLogTab,
+    cleanDeviceState,
   };
 };

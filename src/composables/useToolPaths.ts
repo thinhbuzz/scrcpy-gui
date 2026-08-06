@@ -8,16 +8,23 @@ export interface ToolPaths {
 
 export const useToolPaths = (appendSystemLog: (line: string) => void) => {
   const toolPaths = ref<ToolPaths | null>(null);
+  const loadFailed = ref(false);
 
   const refreshToolPaths = async (): Promise<void> => {
     try {
       toolPaths.value = await getToolPaths();
+      loadFailed.value = false;
     } catch (error) {
       appendSystemLog(`Failed to read tool paths: ${error}\n`);
+      loadFailed.value = true;
     }
   };
 
   const toolsMissing = computed(() => {
+    // If we couldn't load paths, treat as missing so the user is warned.
+    if (loadFailed.value) {
+      return true;
+    }
     if (!toolPaths.value) {
       return false;
     }
@@ -26,14 +33,14 @@ export const useToolPaths = (appendSystemLog: (line: string) => void) => {
 
   const adbMissing = computed(() => {
     if (!toolPaths.value) {
-      return false;
+      return loadFailed.value;
     }
     return !toolPaths.value.adbPath;
   });
 
   const scrcpyMissing = computed(() => {
     if (!toolPaths.value) {
-      return false;
+      return loadFailed.value;
     }
     return !toolPaths.value.scrcpyPath;
   });

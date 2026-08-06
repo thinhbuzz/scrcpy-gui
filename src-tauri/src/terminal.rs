@@ -73,6 +73,12 @@ pub fn open_windows_terminal(device_id: &str) -> Result<(), String> {
 }
 
 pub fn open_macos_terminal(device_id: &str) -> Result<(), String> {
+    if !is_safe_device_id(device_id) {
+        return Err(format!(
+            "Device ID contains invalid characters for terminal: {}",
+            device_id
+        ));
+    }
     let escaped = escape_shell_single(device_id);
     let command = format!(
         "printf '\\033]0;{0}\\007'; alias adb='adb -s {0}'; echo 'adb => adb -s {0}'",
@@ -90,8 +96,14 @@ pub fn open_macos_terminal(device_id: &str) -> Result<(), String> {
 }
 
 pub fn open_linux_terminal(device_id: &str) -> Result<(), String> {
-    let rc_path = write_shell_rc(device_id)?;
-    let rc_path_str = rc_path.to_string_lossy().to_string();
+    if !is_safe_device_id(device_id) {
+        return Err(format!(
+            "Device ID contains invalid characters for terminal: {}",
+            device_id
+        ));
+    }
+    let mut rc_path = write_shell_rc(device_id)?;
+    let mut rc_path_str = rc_path.to_string_lossy().to_string();
     let bash = find_executable("bash").unwrap_or_else(|| PathBuf::from("bash"));
     let bash_str = bash.to_string_lossy().to_string();
 
@@ -146,8 +158,16 @@ pub fn open_linux_terminal(device_id: &str) -> Result<(), String> {
                 });
                 return Ok(());
             }
-            Err(_) => {
-                // Try next terminal emulator
+            Err(err) => {
+                // Spawn failed — clean up the old rc file before trying the next terminal.
+                let _ = std::fs::remove_file(&rc_path);
+                eprintln!(
+                    "Failed to spawn terminal '{}': {}. Trying next...",
+                    terminal, err
+                );
+                // Re-create the rc file for the next candidate
+                rc_path = write_shell_rc(device_id)?;
+                rc_path_str = rc_path.to_string_lossy().to_string();
                 continue;
             }
         }

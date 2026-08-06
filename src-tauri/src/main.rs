@@ -198,19 +198,20 @@ async fn open_device_terminal(
         return Err("Device ID is empty".to_string());
     }
 
-    if cfg!(target_os = "windows") {
+    let result = if cfg!(target_os = "windows") {
         terminal::open_windows_terminal(trimmed)
     } else if cfg!(target_os = "macos") {
         terminal::open_macos_terminal(trimmed)
     } else {
-        terminal::open_linux_terminal(trimmed).map_err(|err| {
-            emit_app_log(
-                &app,
-                format!("[Backend] Failed to open terminal: {}\n", err),
-            );
-            err
-        })
-    }
+        terminal::open_linux_terminal(trimmed)
+    };
+    result.map_err(|err| {
+        emit_app_log(
+            &app,
+            format!("[Backend] Failed to open terminal: {}\n", err),
+        );
+        err
+    })
 }
 
 #[tauri::command]
@@ -360,7 +361,6 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_os::init())
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![

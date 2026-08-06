@@ -34,10 +34,9 @@
     ],
     "security": {
       "capabilities": [
-        "shell-access",
         "default"
       ],
-      "csp": null
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
     }
   }
 }

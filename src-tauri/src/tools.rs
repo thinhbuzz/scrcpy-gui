@@ -296,6 +296,8 @@ pub async fn download_and_install_scrcpy(
 ) -> Result<ToolPaths, String> {
     let client = reqwest::Client::builder()
         .user_agent("scrcpy-gui")
+        .timeout(std::time::Duration::from_secs(120))
+        .connect_timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|err| format!("Failed to create HTTP client: {}", err))?;
     let release = client

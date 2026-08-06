@@ -7,14 +7,19 @@ const props = defineProps<{
   title?: string;
 }>();
 
-const logRef = ref<any>(undefined);
+// ant-design-vue Textarea exposes `resizableTextArea` on its component ref
+// for imperative access to the underlying <textarea> element.
+const logRef = ref<{
+  resizableTextArea?: { textArea: HTMLTextAreaElement };
+} | null>(null);
 
 // Use a computed property to join log lines, limited to the last 1000 lines
 const internalValue = computed(() => props.logLines.slice(-1000).join(""));
 
-// Watch for changes in logLines to handle auto-scroll
+// Watch the joined content so auto-scroll works even after the array is
+// pinned at maxLogLines (1000) — the length stops changing but content doesn't.
 watch(
-  () => props.logLines.length,
+  () => internalValue.value,
   () => {
     nextTick(() => {
       scrollToBottom();
@@ -23,13 +28,12 @@ watch(
 );
 
 const scrollToBottom = () => {
-  if (logRef.value && logRef.value.resizableTextArea) {
-    const textArea = logRef.value.resizableTextArea.textArea;
+  const instance = logRef.value;
+  if (instance && instance.resizableTextArea) {
+    const textArea = instance.resizableTextArea.textArea;
     textArea.scrollTop = textArea.scrollHeight;
   }
 };
-
-defineExpose({ scrollToBottom });
 </script>
 
 <template>
@@ -43,6 +47,7 @@ defineExpose({ scrollToBottom });
         :readonly="true"
         :autoSize="false"
         class="log-textarea"
+        aria-label="Log output"
       ></Textarea>
     </div>
   </div>

@@ -38,6 +38,10 @@ const osNotificationsEnabled = useStorage<boolean>(
 );
 const { checkPermission, ensurePermission } = useNotificationPermission();
 const toolsMissing = computed(() => {
+  // If the initial load failed, show the warning so the user knows paths need attention.
+  if (toolPathsLoadFailed.value) {
+    return true;
+  }
   return !adbPath.value.trim() || !scrcpyPath.value.trim();
 });
 
@@ -46,6 +50,8 @@ const isDownloadingScrcpy = ref(false);
 const permissionGranted = ref<boolean | null>(null);
 const permissionNote = ref<string>("");
 const isNotificationBusy = ref(false);
+const sendTestTimeoutId = ref<ReturnType<typeof setTimeout> | null>(null);
+const toolPathsLoadFailed = ref(false);
 
 const refreshPermission = async (): Promise<void> => {
   try {
@@ -83,6 +89,11 @@ const toggleNotifications = async (checked: boolean): Promise<void> => {
 const sendTestNotification = async (): Promise<void> => {
   isNotificationBusy.value = true;
   permissionNote.value = "";
+  // Clear any previous timeout
+  if (sendTestTimeoutId.value !== null) {
+    clearTimeout(sendTestTimeoutId.value);
+    sendTestTimeoutId.value = null;
+  }
   try {
     const granted = await ensurePermission();
     permissionGranted.value = granted;
@@ -97,7 +108,7 @@ const sendTestNotification = async (): Promise<void> => {
     });
     const timeoutMs = 3000;
     const timeoutPromise = new Promise<"timeout">((resolve) => {
-      setTimeout(() => resolve("timeout"), timeoutMs);
+      sendTestTimeoutId.value = setTimeout(() => resolve("timeout"), timeoutMs);
     });
     const result = await Promise.race([sendPromise, timeoutPromise]);
     if (result === "timeout") {
@@ -108,6 +119,10 @@ const sendTestNotification = async (): Promise<void> => {
     permissionNote.value = `Failed to send test notification: ${error}`;
   } finally {
     isNotificationBusy.value = false;
+    if (sendTestTimeoutId.value !== null) {
+      clearTimeout(sendTestTimeoutId.value);
+      sendTestTimeoutId.value = null;
+    }
   }
 };
 
@@ -176,33 +191,47 @@ const downloadScrcpy = async (): Promise<void> => {
   }
 };
 
+// Debounced sync: wait 500ms after the last change before invoking the backend.
+let adbSyncTimer: ReturnType<typeof setTimeout> | null = null;
+let scrcpySyncTimer: ReturnType<typeof setTimeout> | null = null;
+
 watch(
   () => adbPath.value,
-  async (value) => {
+  (value) => {
     if (!toolPathsLoaded.value) {
       return;
     }
-    try {
-      const trimmed = value.trim();
-      await setAdbPath(trimmed.length > 0 ? trimmed : null);
-    } catch (error) {
-      console.error("Failed to sync adb path:", error);
+    if (adbSyncTimer !== null) {
+      clearTimeout(adbSyncTimer);
     }
+    adbSyncTimer = setTimeout(async () => {
+      try {
+        const trimmed = value.trim();
+        await setAdbPath(trimmed.length > 0 ? trimmed : null);
+      } catch (error) {
+        console.error("Failed to sync adb path:", error);
+      }
+    }, 500);
   }
 );
 
 watch(
   () => scrcpyPath.value,
-  async (value) => {
+  (value) => {
     if (!toolPathsLoaded.value) {
       return;
     }
-    try {
-      const trimmed = value.trim();
-      await setScrcpyPath(trimmed.length > 0 ? trimmed : null);
-    } catch (error) {
-      console.error("Failed to sync scrcpy path:", error);
+    if (scrcpySyncTimer !== null) {
+      clearTimeout(scrcpySyncTimer);
     }
+    scrcpySyncTimer = setTimeout(async () => {
+      try {
+        const trimmed = value.trim();
+        await setScrcpyPath(trimmed.length > 0 ? trimmed : null);
+      } catch (error) {
+        console.error("Failed to sync scrcpy path:", error);
+      }
+    }, 500);
   }
 );
 
@@ -217,19 +246,22 @@ watch(
 );
 
 onMounted(async () => {
-  const toolPaths = await getToolPaths().catch(() => {
-    return null;
-  });
-  toolPathsLoaded.value = true;
-  if (toolPaths) {
-    if (!adbPath.value.trim() && toolPaths.adbPath) {
-      adbPath.value = toolPaths.adbPath;
+  try {
+    const toolPaths = await getToolPaths();
+    if (toolPaths) {
+      if (!adbPath.value.trim() && toolPaths.adbPath) {
+        adbPath.value = toolPaths.adbPath;
+      }
+      if (!scrcpyPath.value.trim() && toolPaths.scrcpyPath) {
+        scrcpyPath.value = toolPaths.scrcpyPath;
+      }
+      await syncToolPaths();
     }
-    if (!scrcpyPath.value.trim() && toolPaths.scrcpyPath) {
-      scrcpyPath.value = toolPaths.scrcpyPath;
-    }
+  } catch {
+    toolPathsLoadFailed.value = true;
+  } finally {
+    toolPathsLoaded.value = true;
   }
-  await syncToolPaths();
 });
 </script>
 

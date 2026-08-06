@@ -9,6 +9,7 @@ interface UseScrcpyListenersOptions {
   refreshDevices: () => Promise<void>;
   stopScrcpy: (deviceId: string) => Promise<void>;
   handleScrcpyLog: (deviceId: string, message: string) => void;
+  cleanDeviceState: (deviceId: string) => void;
 }
 
 interface LogPayload {
@@ -22,11 +23,13 @@ export const useScrcpyListeners = (options: UseScrcpyListenersOptions) => {
   let scrcpyLogUnlisten: (() => void) | null = null;
   let scrcpyExitUnlisten: (() => void) | null = null;
   let appLogUnlisten: (() => void) | null = null;
+  let disposed = false;
 
   const setupListeners = async (): Promise<void> => {
     // Clean up any previously registered listeners to prevent memory leaks
     // if setupListeners() is called multiple times.
     cleanup();
+    disposed = false;
 
     try {
       deviceConnectedUnlisten = await listen<string[]>(
@@ -39,6 +42,7 @@ export const useScrcpyListeners = (options: UseScrcpyListenersOptions) => {
           options.refreshDevices();
         }
       );
+      if (disposed) return;
     } catch (error) {
       options.appendSystemLog(
         `[Frontend] Error setting up device-connected listener: ${error}\n`
@@ -70,6 +74,9 @@ export const useScrcpyListeners = (options: UseScrcpyListenersOptions) => {
                 (id) => id !== deviceId
               );
             }
+
+            // Clean up any pending install/push state for disconnected devices
+            options.cleanDeviceState(deviceId);
           });
 
           if (
@@ -95,6 +102,7 @@ export const useScrcpyListeners = (options: UseScrcpyListenersOptions) => {
         const { deviceId, message } = event.payload;
         options.handleScrcpyLog(deviceId, message);
       });
+      if (disposed) return;
     } catch (error) {
       options.appendSystemLog(
         `[Frontend] Error setting up log listener: ${error}\n`
@@ -114,6 +122,7 @@ export const useScrcpyListeners = (options: UseScrcpyListenersOptions) => {
           );
         }
       );
+      if (disposed) return;
     } catch (error) {
       options.appendSystemLog(
         `[Frontend] Error setting up scrcpy-exit listener: ${error}\n`
@@ -124,6 +133,7 @@ export const useScrcpyListeners = (options: UseScrcpyListenersOptions) => {
       appLogUnlisten = await listen<string>("app-log", (event) => {
         options.appendSystemLog(event.payload);
       });
+      if (disposed) return;
     } catch (error) {
       options.appendSystemLog(
         `[Frontend] Error setting up app-log listener: ${error}\n`
@@ -132,6 +142,7 @@ export const useScrcpyListeners = (options: UseScrcpyListenersOptions) => {
   };
 
   const cleanup = (): void => {
+    disposed = true;
     if (deviceConnectedUnlisten) deviceConnectedUnlisten();
     if (deviceDisconnectedUnlisten) deviceDisconnectedUnlisten();
     if (scrcpyLogUnlisten) scrcpyLogUnlisten();

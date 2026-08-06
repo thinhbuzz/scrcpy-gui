@@ -3,8 +3,8 @@ name = "scrcpy-gui"
 version = "1.2.9"
 description = "A GUI for Scrcpy built with Tauri"
 authors = ["ThinhBuzz"]
-license = ""
-repository = ""
+license = "MIT"
+repository = "https://github.com/thinhbuzz/scrcpy-gui"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -16,7 +16,6 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = { version = "2", features = [] }
 tauri-plugin-notification = { version = "2", features = [] }
-tauri-plugin-shell = { version = "2", features = [] }
 tauri-plugin-os = { version = "2", features = [] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

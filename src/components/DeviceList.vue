@@ -62,7 +62,7 @@ const toggleDeviceSelection = (deviceId: string, checked: boolean): void => {
             @click="selectAllDevices(false)"
             :disabled="!availableDevices.length"
           >
-            UnSelect All
+            Unselect All
           </Button>
           <Button type="primary" size="small" @click="emit('refresh')">
             Refresh
@@ -81,6 +81,7 @@ const toggleDeviceSelection = (deviceId: string, checked: boolean): void => {
         <div class="device-info">
           <Checkbox
             :checked="selected.includes(device.id)"
+            :aria-label="`Select ${device.label}`"
             @change="(event) => toggleDeviceSelection(device.id, event.target.checked)"
           />
           <span class="device-id">{{ device.label }}</span>

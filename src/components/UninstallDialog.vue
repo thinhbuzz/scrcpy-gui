@@ -34,6 +34,8 @@ const batchRunning = ref(false);
 const searchTerm = ref("");
 const systemFilter = ref<"all" | "system" | "user">("all");
 const selectedPackages = ref<Set<string>>(new Set());
+// Request sequencing to prevent stale responses from overwriting newer ones
+let appsRequestSeq = 0;
 
 const appLabel = (app: DeviceApp): string => app.name || app.packageName;
 
@@ -151,16 +153,27 @@ const refreshApps = async (): Promise<void> => {
     clearSelection();
     return;
   }
+  const seq = ++appsRequestSeq;
+  const deviceId = selectedDeviceId.value;
   loading.value = true;
   try {
-    apps.value = await listDeviceApps(selectedDeviceId.value);
-    pruneSelection();
+    const result = await listDeviceApps(deviceId);
+    // Only apply the result if this is still the latest request and the
+    // device selection hasn't changed while we were fetching.
+    if (seq === appsRequestSeq && selectedDeviceId.value === deviceId) {
+      apps.value = result;
+      pruneSelection();
+    }
   } catch (error) {
-    apps.value = [];
-    clearSelection();
-    message.error(`Failed to load apps: ${error}`);
+    if (seq === appsRequestSeq && selectedDeviceId.value === deviceId) {
+      apps.value = [];
+      clearSelection();
+      message.error(`Failed to load apps: ${error}`);
+    }
   } finally {
-    loading.value = false;
+    if (seq === appsRequestSeq && selectedDeviceId.value === deviceId) {
+      loading.value = false;
+    }
   }
 };
 
@@ -299,7 +312,12 @@ const batchInstall = () =>
 watch(
   () => props.open,
   (value) => {
-    if (value) refreshDevices().then(() => refreshApps());
+    if (value) {
+      clearSelection();
+      void refreshDevices();
+      // refreshApps() is triggered by the selectedDeviceId watcher below,
+      // which fires when refreshDevices sets the default device.
+    }
   },
   { immediate: true }
 );
@@ -316,8 +334,8 @@ watch(
 
 watch(
   () => selectedDeviceId.value,
-  () => {
-    if (openModel.value) {
+  (newVal, oldVal) => {
+    if (openModel.value && newVal !== oldVal) {
       clearSelection();
       refreshApps();
     }

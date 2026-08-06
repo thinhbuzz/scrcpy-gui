@@ -67,6 +67,9 @@ const hasSeenToolWarning = useStorage<boolean>(
   undefined,
   { mergeDefaults: true }
 );
+// Track in-flight start/stop operations to prevent races
+const startingDevices = ref<Set<string>>(new Set());
+const stoppingDevices = ref<Set<string>>(new Set());
 const {
   systemLogLines,
   deviceLogLines,
@@ -76,6 +79,7 @@ const {
   appendSystemLog,
   handleScrcpyLog,
   setActiveLogTab,
+  cleanDeviceState,
 } = useScrcpyLogs(osNotificationsEnabled, availableDevices);
 const {
   refreshToolPaths,
@@ -102,10 +106,13 @@ const { setupListeners, cleanup } = useScrcpyListeners({
   refreshDevices,
   stopScrcpy,
   handleScrcpyLog,
+  cleanDeviceState,
 });
 
+const monitoringRafId = ref<number | null>(null);
+
 const startMonitoringAfterPaint = (): void => {
-  window.requestAnimationFrame(() => {
+  monitoringRafId.value = window.requestAnimationFrame(() => {
     setTimeout(() => {
       startDeviceMonitoring()
         .then(refreshDevices)
@@ -133,6 +140,9 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  if (monitoringRafId.value !== null) {
+    window.cancelAnimationFrame(monitoringRafId.value);
+  }
   cleanup();
 });
 
@@ -187,10 +197,17 @@ const startDevice = async (deviceId: string): Promise<void> => {
   if (startedDevices.value.includes(deviceId)) {
     return;
   }
+  if (startingDevices.value.has(deviceId)) {
+    return;
+  }
+  startingDevices.value = new Set(startingDevices.value).add(deviceId);
 
+  // Guard against null/undefined FPS — ant-design-vue InputNumber emits null when cleared
+  const fps = Number(selectedFPS.value);
+  const safeFps = Number.isFinite(fps) && fps > 0 ? fps : 60;
   const args = ["-s", deviceId]
     .concat(selectedOptions.value)
-    .concat(["--max-fps", selectedFPS.value.toString()]);
+    .concat(["--max-fps", safeFps.toString()]);
 
   try {
     await refreshToolPaths();
@@ -203,9 +220,13 @@ const startDevice = async (deviceId: string): Promise<void> => {
     }
     appendSystemLog(`[Frontend] Requesting start for ${deviceId}...\n`);
     await startScrcpy(deviceId, args);
-    startedDevices.value.push(deviceId);
+    startedDevices.value = [...startedDevices.value, deviceId];
   } catch (error) {
     appendSystemLog(`Error starting ${deviceId}: ${error}\n`);
+  } finally {
+    const next = new Set(startingDevices.value);
+    next.delete(deviceId);
+    startingDevices.value = next;
   }
 };
 
@@ -213,12 +234,19 @@ const stopDevice = async (deviceId: string): Promise<void> => {
   if (!startedDevices.value.includes(deviceId)) {
     return;
   }
+  if (stoppingDevices.value.has(deviceId)) {
+    return;
+  }
+  stoppingDevices.value = new Set(stoppingDevices.value).add(deviceId);
   try {
     await stopScrcpy(deviceId);
+    startedDevices.value = startedDevices.value.filter((id) => id !== deviceId);
   } catch (error) {
     appendSystemLog(`Failed to stop scrcpy for ${deviceId}: ${error}\n`);
   } finally {
-    startedDevices.value = startedDevices.value.filter((id) => id !== deviceId);
+    const next = new Set(stoppingDevices.value);
+    next.delete(deviceId);
+    stoppingDevices.value = next;
   }
 };
 
@@ -271,7 +299,8 @@ watch(
         <div class="fps">
           <InputNumber
             placeholder="FPS"
-            :min="0"
+            :min="1"
+            :max="240"
             v-model:value="selectedFPS"
             size="small"
           />
