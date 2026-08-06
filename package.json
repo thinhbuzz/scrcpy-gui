@@ -11,20 +11,20 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-os": "^2.3.2",
     "@tauri-apps/plugin-shell": "^2.3.5",
-    "@vueuse/core": "^14.2.1",
+    "@vueuse/core": "^14.4.0",
     "ant-design-vue": "^4.2.6",
-    "sass": "^1.98.0",
-    "vue": "^3.5.30"
+    "sass": "^1.102.0",
+    "vue": "^3.5.41"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.10.1",
-    "@vitejs/plugin-vue": "^6.0.5",
-    "typescript": "^5.9.3",
-    "vite": "^7.3.1",
-    "vue-tsc": "^3.2.5"
+    "@tauri-apps/cli": "^2.11.4",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "typescript": "^5.9",
+    "vite": "^8.2.1",
+    "vue-tsc": "^3.3.9"
   }
 }
