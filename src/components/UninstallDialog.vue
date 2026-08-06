@@ -36,6 +36,9 @@ const systemFilter = ref<"all" | "system" | "user">("all");
 const selectedPackages = ref<Set<string>>(new Set());
 // Request sequencing to prevent stale responses from overwriting newer ones
 let appsRequestSeq = 0;
+// Guard to prevent duplicate refreshApps() when the dialog opens and
+// refreshDevices() sets the initial device selection.
+let initializing = false;
 
 const appLabel = (app: DeviceApp): string => app.name || app.packageName;
 
@@ -311,12 +314,13 @@ const batchInstall = () =>
 // Watchers
 watch(
   () => props.open,
-  (value) => {
+  async (value) => {
     if (value) {
       clearSelection();
-      void refreshDevices();
-      // refreshApps() is triggered by the selectedDeviceId watcher below,
-      // which fires when refreshDevices sets the default device.
+      initializing = true;
+      await refreshDevices();
+      initializing = false;
+      refreshApps();
     }
   },
   { immediate: true }
@@ -335,7 +339,9 @@ watch(
 watch(
   () => selectedDeviceId.value,
   (newVal, oldVal) => {
-    if (openModel.value && newVal !== oldVal) {
+    // Skip during dialog initialization — refreshApps() is called by the
+    // open watcher after refreshDevices() completes.
+    if (openModel.value && !initializing && newVal !== oldVal) {
       clearSelection();
       refreshApps();
     }
