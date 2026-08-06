@@ -91,6 +91,7 @@ export const useScrcpyListeners = (options: UseScrcpyListenersOptions) => {
           options.refreshDevices();
         }
       );
+      if (disposed) return;
     } catch (error) {
       options.appendSystemLog(
         `[Frontend] Error setting up device-disconnected listener: ${error}\n`
