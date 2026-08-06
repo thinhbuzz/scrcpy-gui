@@ -10,8 +10,8 @@ import {
   Tabs,
 } from "ant-design-vue";
 import { useStorage } from "@vueuse/core";
-import { requestPermission } from "@tauri-apps/plugin-notification";
 import { platform } from "@tauri-apps/plugin-os";
+import { useNotificationPermission } from "../composables/useNotificationPermission";
 import {
   getDevices,
   openDeviceTerminal,
@@ -54,12 +54,7 @@ const osNotificationsEnabled = useStorage<boolean>(
   undefined,
   { mergeDefaults: true }
 );
-const notificationPermissionGrantedCache = useStorage<boolean>(
-  "notificationPermissionGrantedCache",
-  false,
-  undefined,
-  { mergeDefaults: true }
-);
+const { ensurePermission } = useNotificationPermission();
 const availableDevices = ref<DeviceInfo[]>([]);
 const startedDevices = ref<string[]>([]);
 const settingsOpen = ref(false);
@@ -131,13 +126,10 @@ onMounted(() => {
       hasSeenToolWarning.value = true;
     }
   });
-  // On Windows, isPermissionGranted() can return false after app restart even
-  // though the user previously granted permission. Proactively re-register the
-  // COM toast activator so notifications work without needing to open Settings.
+  // On Windows, proactively re-register the COM toast activator on startup
+  // so notifications work without needing to open Settings first.
   if (osNotificationsEnabled.value && platform() === "windows") {
-    requestPermission().then((result) => {
-      notificationPermissionGrantedCache.value = result === "granted";
-    });
+    void ensurePermission();
   }
 });
 
