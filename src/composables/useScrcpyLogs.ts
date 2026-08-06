@@ -1,11 +1,6 @@
 import { computed, ref, watch, type Ref } from "vue";
-import {
-  isPermissionGranted,
-  requestPermission,
-  sendNotification,
-} from "@tauri-apps/plugin-notification";
-import { platform } from "@tauri-apps/plugin-os";
-import { useStorage } from "@vueuse/core";
+import { sendNotification } from "@tauri-apps/plugin-notification";
+import { useNotificationPermission } from "./useNotificationPermission";
 
 const maxLogLines = 1000;
 const apkInstallRequestRe = /^INFO: Request to install (.+)$/;
@@ -54,12 +49,7 @@ export const useScrcpyLogs = (
     trimLogLines(deviceLogLines.value[deviceId]);
   };
 
-  const notificationPermissionGrantedCache = useStorage<boolean>(
-    "notificationPermissionGrantedCache",
-    false,
-    undefined,
-    { mergeDefaults: true }
-  );
+  const { ensurePermission } = useNotificationPermission();
 
   const sendOsNotification = async (
     title: string,
@@ -69,21 +59,7 @@ export const useScrcpyLogs = (
       return;
     }
     try {
-      let granted = await isPermissionGranted();
-      // On Windows, isPermissionGranted() may return false after app restart
-      // even though the user previously granted permission in system settings.
-      // Trust the cached value as a fallback.
-      if (!granted && platform() === "windows" && notificationPermissionGrantedCache.value) {
-        granted = true;
-      }
-      // If still not granted, try requesting permission as a last resort.
-      // On Windows this re-registers the COM toast activator without showing
-      // a dialog when system permission is already granted.
-      if (!granted) {
-        const result = await requestPermission();
-        granted = result === "granted";
-        notificationPermissionGrantedCache.value = granted;
-      }
+      const granted = await ensurePermission();
       if (!granted) {
         appendSystemLog("[Frontend] Notification permission not granted.\n");
         return;
