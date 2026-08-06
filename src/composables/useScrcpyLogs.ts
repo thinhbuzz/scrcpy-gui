@@ -1,6 +1,7 @@
 import { computed, ref, watch, type Ref } from "vue";
 import {
   isPermissionGranted,
+  requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { platform } from "@tauri-apps/plugin-os";
@@ -74,6 +75,14 @@ export const useScrcpyLogs = (
       // Trust the cached value as a fallback.
       if (!granted && platform() === "windows" && notificationPermissionGrantedCache.value) {
         granted = true;
+      }
+      // If still not granted, try requesting permission as a last resort.
+      // On Windows this re-registers the COM toast activator without showing
+      // a dialog when system permission is already granted.
+      if (!granted) {
+        const result = await requestPermission();
+        granted = result === "granted";
+        notificationPermissionGrantedCache.value = granted;
       }
       if (!granted) {
         appendSystemLog("[Frontend] Notification permission not granted.\n");

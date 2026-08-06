@@ -54,6 +54,12 @@ const osNotificationsEnabled = useStorage<boolean>(
   undefined,
   { mergeDefaults: true }
 );
+const notificationPermissionGrantedCache = useStorage<boolean>(
+  "notificationPermissionGrantedCache",
+  false,
+  undefined,
+  { mergeDefaults: true }
+);
 const availableDevices = ref<DeviceInfo[]>([]);
 const startedDevices = ref<string[]>([]);
 const settingsOpen = ref(false);
@@ -129,7 +135,9 @@ onMounted(() => {
   // though the user previously granted permission. Proactively re-register the
   // COM toast activator so notifications work without needing to open Settings.
   if (osNotificationsEnabled.value && platform() === "windows") {
-    void requestPermission();
+    requestPermission().then((result) => {
+      notificationPermissionGrantedCache.value = result === "granted";
+    });
   }
 });
 
