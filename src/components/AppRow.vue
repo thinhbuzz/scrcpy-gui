@@ -54,7 +54,7 @@ const appIconSrc = (app: DeviceApp): string => {
         </span>
       </div>
       <div class="app-package">
-        {{ app.packageName }} - {{ app.versionName }} ({{ app.versionCode }})
+        {{ app.packageName }} - {{ app.versionName || '?' }} ({{ app.versionCode ?? '?' }})
       </div>
     </div>
     <div class="app-actions">

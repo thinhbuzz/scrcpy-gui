@@ -51,8 +51,10 @@ pub struct ToolPaths {
 pub struct DeviceApp {
     pub name: String,
     pub package_name: String,
-    pub version_name: String,
-    pub version_code: u32,
+    #[serde(default)]
+    pub version_name: Option<String>,
+    #[serde(default)]
+    pub version_code: Option<u32>,
     pub is_system_app: bool,
     pub base64_icon: String,
     pub is_installed_for_user: bool,
